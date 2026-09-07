@@ -6,6 +6,7 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+
 from pydantic import BaseModel
 
 from .domain import Agency, Candidate, CandidateStatus, DictionaryEntry, ReviewRecord

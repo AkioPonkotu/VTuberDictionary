@@ -1,0 +1,54 @@
+name: Update VTuber dictionary
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --all-groups
+      - run: uv run pytest
+      - run: uv run ruff check .
+      - run: uv run mypy src
+
+  update:
+    needs: test
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    environment: dictionary-update
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --all-groups
+      - name: Run safe update pipeline
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          YOUTUBE_MIN_SUBSCRIBERS: ${{ vars.YOUTUBE_MIN_SUBSCRIBERS || '10000' }}
+          TWITCH_MIN_FOLLOWERS: ${{ vars.TWITCH_MIN_FOLLOWERS || '5000' }}
+          AUDIENCE_THRESHOLD_MODE: ${{ vars.AUDIENCE_THRESHOLD_MODE || 'any' }}
+          TWITCH_DISCOVERY_ENABLED: ${{ vars.TWITCH_DISCOVERY_ENABLED || 'true' }}
+          TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
+          TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
+          TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
+        run: uv run vtuber-dictionary update
+      - name: Commit changed canonical data and artifact
+        run: |
+          git add -A data dist
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update VTuber dictionary"
+          git push

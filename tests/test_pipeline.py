@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from vtuber_dictionary.agents import ReadingResearchAgent, VerificationAgent
+from vtuber_dictionary.dictionary import DictionaryCompiler
+from vtuber_dictionary.discovery import AgencyDiscovery, TwitchDiscovery
+from vtuber_dictionary.domain import (
+    Agency,
+    AudienceMetrics,
+    Candidate,
+    DictionaryEntry,
+    Evidence,
+    ResearchResult,
+    VerificationResult,
+)
+from vtuber_dictionary.filtering import ExistingEntryFilter, ThresholdFilter
+from vtuber_dictionary.repository import CandidateRepository
+from vtuber_dictionary.validation import DeterministicValidator
+
+
+class FakeAgencySource:
+    async def list_talents(self, agency: Agency) -> list[Candidate]:
+        return [Candidate(display_name="公式タレント", youtube_channel_id="channel-1")]
+
+
+class FakeStreams:
+    def streams(self, language: str | None) -> AsyncIterator[list[dict[str, object]]]:
+        async def pages() -> AsyncIterator[list[dict[str, object]]]:
+            assert language == "ja"
+            yield [
+                {"user_id": "1", "user_login": "one", "user_name": "One", "tags": ["vTuBeR"]},
+                {"user_id": "2", "user_login": "two", "user_name": "Two", "tags": ["gaming"]},
+            ]
+
+        return pages()
+
+
+class FakeRunner:
+    def __init__(self, responses: list[str]) -> None:
+        self.responses = responses
+
+    async def run_json(self, instructions: str, prompt: str, response_model: type[object]) -> str:
+        return self.responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_agency_discovery_marks_candidates_without_verifying() -> None:
+    agency = Agency(
+        name="Agency", official_url="https://example.com", talent_list_url="https://example.com/t"
+    )
+    found = await AgencyDiscovery(FakeAgencySource()).discover([agency])
+    assert found[0].agency == "Agency"
+    assert found[0].discovery_sources == {"agency"}
+
+
+@pytest.mark.asyncio
+async def test_twitch_discovery_filters_tag_case_insensitively() -> None:
+    found = await TwitchDiscovery(FakeStreams(), "VTuber", "ja").discover()
+    assert [(item.twitch_user_id, item.twitch_login) for item in found] == [("1", "one")]
+
+
+def test_candidate_repository_deduplicates_only_explicit_identity(tmp_path: Path) -> None:
+    repo = CandidateRepository(tmp_path / "candidates.jsonl")
+    original = repo.upsert(Candidate(display_name="同名", youtube_channel_id="a"))
+    assert (
+        repo.upsert(Candidate(display_name="別表記", youtube_channel_id="a")).canonical_id
+        == original.canonical_id
+    )
+    assert (
+        repo.upsert(Candidate(display_name="同名", youtube_channel_id="b")).canonical_id
+        != original.canonical_id
+    )
+
+
+def test_ambiguous_identity_is_review_required(tmp_path: Path) -> None:
+    repo = CandidateRepository(tmp_path / "candidates.jsonl")
+    repo.upsert(Candidate(display_name="A", youtube_channel_id="youtube-a"))
+    repo.upsert(Candidate(display_name="A", twitch_user_id="twitch-a"))
+    ambiguous = repo.upsert(
+        Candidate(display_name="A", youtube_channel_id="youtube-a", twitch_user_id="twitch-a")
+    )
+    assert ambiguous.status == "review_required"
+
+
+def test_threshold_filter_supports_youtube_twitch_and_or() -> None:
+    filter_ = ThresholdFilter(10_000, 5_000)
+    assert filter_.accepts(AudienceMetrics(youtube_subscribers=10_000))
+    assert filter_.accepts(AudienceMetrics(twitch_followers=5_000))
+    assert filter_.accepts(AudienceMetrics(youtube_subscribers=1, twitch_followers=5_000))
+    assert not filter_.accepts(AudienceMetrics(youtube_subscribers=9_999, twitch_followers=4_999))
+
+
+def test_existing_entry_filter_uses_canonical_id_and_reverify_window() -> None:
+    candidate = Candidate(display_name="表示名")
+    entry = DictionaryEntry(
+        canonical_id=candidate.canonical_id,
+        reading="ひょうじめい",
+        canonical_name="表示名",
+        source_urls=["https://official.example"],
+        verified_at=datetime.now(UTC),
+    )
+    filter_ = ExistingEntryFilter([entry], 180)
+    assert not filter_.needs_research(candidate)
+    assert filter_.needs_research(candidate, entry.verified_at + timedelta(days=181))
+
+
+@pytest.mark.asyncio
+async def test_research_and_verification_parse_structured_output() -> None:
+    runner = FakeRunner(
+        [
+            '{"canonical_name":"星街すいせい","reading":"ほしまちすいせい","confidence":0.9,"evidence":[{"url":"https://official.example","source_type":"official_profile","claim":"reading"}],"status":"resolved"}',
+            '{"verified":true,"canonical_name":"星街すいせい","reading":"ほしまちすいせい","confidence":0.95,"evidence":[{"url":"https://official.example","source_type":"official_profile","claim":"reading"}],"issues":[]}',
+        ]
+    )
+    candidate, metrics = Candidate(display_name="星街すいせい"), AudienceMetrics()
+    research = await ReadingResearchAgent(runner).research(candidate, metrics)
+    verified = await VerificationAgent(runner).verify(candidate, research, metrics)
+    assert research.status == "resolved" and verified.verified
+
+
+def test_deterministic_validator_and_compiler(tmp_path: Path) -> None:
+    candidate = Candidate(display_name="星街すいせい")
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="reading")
+    ]
+    research = ResearchResult(
+        canonical_name="星街すいせい",
+        reading="ほしまちすいせい",
+        confidence=0.9,
+        evidence=evidence,
+        status="resolved",
+    )
+    verification = VerificationResult(
+        verified=True,
+        canonical_name="星街すいせい",
+        reading="ほしまちすいせい",
+        confidence=0.9,
+        evidence=evidence,
+    )
+    entry, reason = DeterministicValidator().validate(candidate, research, verification, [])
+    assert reason is None and entry is not None
+    output = tmp_path / "dictionary.tsv"
+    DictionaryCompiler().compile([entry], output)
+    assert output.read_text("utf-8") == "ほしまちすいせい\t星街すいせい\n"
+
+
+def test_validator_rejects_unverified_and_invalid_reading() -> None:
+    candidate = Candidate(display_name="X")
+    invalid = VerificationResult(
+        verified=True, canonical_name="X", reading="invalid", confidence=1, evidence=[]
+    )
+    research = ResearchResult(confidence=0, status="unresolved")
+    entry, reason = DeterministicValidator().validate(candidate, research, invalid, [])
+    assert entry is None and reason == "reading must consist of hiragana and prolonged-sound mark"

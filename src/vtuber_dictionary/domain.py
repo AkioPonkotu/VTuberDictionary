@@ -44,6 +44,10 @@ class Candidate(BaseModel):
                 f"youtube:{self.youtube_channel_id}" if self.youtube_channel_id else None,
                 f"twitch:{self.twitch_user_id}" if self.twitch_user_id else None,
                 f"profile:{self.official_profile_url}" if self.official_profile_url else None,
+                f"youtube-url:{self.youtube_channel_url.rstrip('/')}"
+                if self.youtube_channel_url
+                else None,
+                f"twitch-url:{self.twitch_url.rstrip('/')}" if self.twitch_url else None,
             )
             if key
         }

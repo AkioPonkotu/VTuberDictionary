@@ -44,17 +44,37 @@ class AgencyPageTalentSource:
         self.http = http or RetryingHttpClient()
 
     async def list_talents(self, agency: Agency) -> list[Candidate]:
-        response = await self.http.client.get(agency.talent_list_url)
-        response.raise_for_status()
+        body = await self.http.get_text(agency.talent_list_url)
         parser = _Links()
-        parser.feed(response.text)
+        parser.feed(body)
         allowed_host = urlparse(agency.official_url).netloc
         candidates: list[Candidate] = []
         for href, name in parser.links:
             profile = urljoin(agency.talent_list_url, href)
             if not name or urlparse(profile).netloc != allowed_host:
                 continue
-            candidates.append(
-                Candidate(display_name=name, agency=agency.name, official_profile_url=profile)
+            candidate = Candidate(
+                display_name=name, agency=agency.name, official_profile_url=profile
             )
+            await self._add_official_platform_links(candidate)
+            candidates.append(candidate)
         return candidates
+
+    async def _add_official_platform_links(self, candidate: Candidate) -> None:
+        """Use links embedded in the official profile as identity evidence."""
+        if not candidate.official_profile_url:
+            return
+        parser = _Links()
+        parser.feed(await self.http.get_text(candidate.official_profile_url))
+        for href, _ in parser.links:
+            url = urljoin(candidate.official_profile_url, href).rstrip("/")
+            parsed = urlparse(url)
+            host = parsed.netloc.casefold().removeprefix("www.")
+            parts = [part for part in parsed.path.split("/") if part]
+            if host in {"youtube.com", "m.youtube.com"}:
+                candidate.youtube_channel_url = url
+                if len(parts) >= 2 and parts[0] == "channel":
+                    candidate.youtube_channel_id = parts[1]
+            elif host == "twitch.tv" and parts:
+                candidate.twitch_url = url
+                candidate.twitch_login = parts[0]

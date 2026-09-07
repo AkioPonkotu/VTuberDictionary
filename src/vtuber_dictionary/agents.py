@@ -5,11 +5,15 @@ from __future__ import annotations
 import json
 from typing import Protocol
 
+from pydantic import BaseModel
+
 from .domain import AudienceMetrics, Candidate, ResearchResult, VerificationResult
 
 
 class JsonAgentRunner(Protocol):
-    async def run_json(self, instructions: str, prompt: str) -> str: ...
+    async def run_json(
+        self, instructions: str, prompt: str, response_model: type[BaseModel]
+    ) -> str: ...
 
 
 class AgentFrameworkJsonRunner:
@@ -24,7 +28,9 @@ class AgentFrameworkJsonRunner:
     def __init__(self, api_key: str, model: str) -> None:
         self.api_key, self.model = api_key, model
 
-    async def run_json(self, instructions: str, prompt: str) -> str:
+    async def run_json(
+        self, instructions: str, prompt: str, response_model: type[BaseModel]
+    ) -> str:
         try:
             from agent_framework.openai import OpenAIChatClient
         except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific
@@ -32,10 +38,19 @@ class AgentFrameworkJsonRunner:
                 "Microsoft Agent Framework OpenAI provider is unavailable; "
                 "install agent-framework-openai compatible with agent-framework-core."
             ) from exc
-        client = OpenAIChatClient(api_key=self.api_key, model_id=self.model)
-        agent = client.create_agent(instructions=instructions)
-        response = await agent.run(prompt)
-        return str(response)
+        client = OpenAIChatClient(api_key=self.api_key, model=self.model)
+        agent = client.as_agent(
+            name="VTuberReadingResearch"
+            if "ReadingResearchAgent" in instructions
+            else "VTuberVerification",
+            instructions=instructions,
+            tools=[client.get_web_search_tool()],
+        )
+        response = await agent.run(prompt, options={"response_format": response_model})
+        value = getattr(response, "value", None)
+        if isinstance(value, BaseModel):
+            return value.model_dump_json()
+        return str(getattr(response, "text", response))
 
 
 RESEARCH_INSTRUCTIONS = """You are ReadingResearchAgent. Research exactly one Japanese VTuber.
@@ -65,7 +80,7 @@ class ReadingResearchAgent:
 
     async def research(self, candidate: Candidate, metrics: AudienceMetrics) -> ResearchResult:
         raw = await self.runner.run_json(
-            RESEARCH_INSTRUCTIONS, _candidate_context(candidate, metrics)
+            RESEARCH_INSTRUCTIONS, _candidate_context(candidate, metrics), ResearchResult
         )
         return ResearchResult.model_validate_json(raw)
 
@@ -82,5 +97,5 @@ class VerificationAgent:
             + "\nPrior research to audit (not authority):\n"
             + research.model_dump_json()
         )
-        raw = await self.runner.run_json(VERIFY_INSTRUCTIONS, prompt)
+        raw = await self.runner.run_json(VERIFY_INSTRUCTIONS, prompt, VerificationResult)
         return VerificationResult.model_validate_json(raw)

@@ -10,9 +10,10 @@ htmlcov/
 # Local credentials and settings
 .env
 
-# Generated runtime files; committed fixtures use .gitkeep instead.
-data/*.jsonl
-dist/*.tsv
+# Versioned canonical data and distributable dictionaries are intentionally committed.
+# Only interrupted atomic-write artifacts stay local.
+data/*.tmp
+dist/*.tmp
 
 # OS/editor files
 .DS_Store

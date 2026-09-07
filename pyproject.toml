@@ -8,6 +8,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "AkioPonkotu" }]
 dependencies = [
     "agent-framework-core>=1.17,<2",
+    "agent-framework-openai>=1.14,<1.15",
     "httpx>=0.28,<1",
     "pydantic>=2.11,<3",
     "pydantic-settings>=2.10,<3",
@@ -33,9 +34,10 @@ build-backend = "hatchling.build"
 packages = ["src/vtuber_dictionary"]
 
 [tool.pytest.ini_options]
-addopts = "--strict-markers --cov=vtuber_dictionary --cov-report=term-missing"
+addopts = "--strict-markers --ignore=tests/integration --cov=vtuber_dictionary --cov-report=term-missing"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["integration: opt-in tests that call a real external service"]
 
 [tool.coverage.run]
 branch = true

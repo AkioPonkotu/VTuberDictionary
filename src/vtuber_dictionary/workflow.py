@@ -35,7 +35,8 @@ class Pipeline:
             self.settings.audience_threshold_mode,
         )
         additions: list[DictionaryEntry] = []
-        for candidate in self.candidates.all():
+        candidates = self.candidates.all()
+        for candidate in candidates:
             if (
                 candidate.status == CandidateStatus.REVIEW_REQUIRED
                 or not existing_filter.needs_research(candidate)
@@ -64,11 +65,13 @@ class Pipeline:
                 continue
             candidate.status = CandidateStatus.VERIFIED
             additions.append(entry)
+        by_identity = {entry.canonical_id: entry for entry in existing}
+        by_identity.update({entry.canonical_id: entry for entry in additions})
+        all_entries = list(by_identity.values())
         if additions:
-            by_identity = {entry.canonical_id: entry for entry in existing}
-            by_identity.update({entry.canonical_id: entry for entry in additions})
-            all_entries = list(by_identity.values())
             self.entries.replace(all_entries)
-            self.candidates.replace(self.candidates.all())
             self.compiler.compile(all_entries, self.settings.dist_dir / "vtuber_dictionary.tsv")
+        elif all_entries and not (self.settings.dist_dir / "vtuber_dictionary.tsv").exists():
+            self.compiler.compile(all_entries, self.settings.dist_dir / "vtuber_dictionary.tsv")
+        self.candidates.replace(candidates)
         return len(additions)

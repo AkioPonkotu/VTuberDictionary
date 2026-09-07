@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any, Literal, cast
 from urllib.parse import urlparse
@@ -13,6 +14,12 @@ import httpx
 from .domain import AudienceMetrics, Candidate
 
 LOG = logging.getLogger(__name__)
+TWITCH_LOGIN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_]{3,24}$", re.IGNORECASE)
+
+
+def valid_twitch_login(value: str) -> str | None:
+    login = value.strip()
+    return login if TWITCH_LOGIN_PATTERN.fullmatch(login) else None
 
 
 class ApiError(RuntimeError):
@@ -134,9 +141,13 @@ class TwitchHelixClient:
 
     async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
         if not candidate.twitch_user_id and candidate.twitch_login:
+            login = valid_twitch_login(candidate.twitch_login)
+            if login is None:
+                return AudienceMetrics()
+            candidate.twitch_login = login
             lookup = await self.http.get_json(
                 "https://api.twitch.tv/helix/users",
-                params={"login": candidate.twitch_login},
+                params={"login": login},
                 headers=self.headers,
             )
             users = lookup.get("data", [])

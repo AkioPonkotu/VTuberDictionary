@@ -7,7 +7,7 @@ from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
 from .domain import Agency, Candidate
-from .platforms import RetryingHttpClient
+from .platforms import RetryingHttpClient, valid_twitch_login
 
 
 class _Links(HTMLParser):
@@ -90,5 +90,7 @@ class AgencyPageTalentSource:
                 if len(parts) >= 2 and parts[0] == "channel":
                     candidate.youtube_channel_id = parts[1]
             elif label == "twitch" and host == "twitch.tv" and parts:
-                candidate.twitch_url = url
-                candidate.twitch_login = parts[0]
+                login = valid_twitch_login(parts[0])
+                if login:
+                    candidate.twitch_url = f"https://www.twitch.tv/{login}"
+                    candidate.twitch_login = login

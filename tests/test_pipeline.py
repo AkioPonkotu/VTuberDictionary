@@ -24,6 +24,7 @@ from vtuber_dictionary.platforms import (
     AuthenticationError,
     CombinedPlatformClient,
     RetryingHttpClient,
+    TwitchHelixClient,
     YouTubeDataClient,
 )
 from vtuber_dictionary.repository import CandidateRepository, EntryRepository, ReviewRepository
@@ -156,6 +157,18 @@ async def test_youtube_client_strips_query_from_official_handle() -> None:
     )
     await YouTubeDataClient("key", http=http).audience_metrics(candidate)  # type: ignore[arg-type]
     assert http.params is not None and http.params["forHandle"] == "candidate"
+
+
+@pytest.mark.asyncio
+async def test_twitch_client_skips_invalid_login_without_request() -> None:
+    class FakeHttp:
+        async def get_json(self, url: str, **kwargs: object) -> dict[str, object]:
+            raise AssertionError("invalid login must not call Twitch")
+
+    metrics = await TwitchHelixClient("id", "token", http=FakeHttp()).audience_metrics(  # type: ignore[arg-type]
+        Candidate(display_name="candidate", twitch_login="invalid+login")
+    )
+    assert metrics.twitch_followers is None
 
 
 @pytest.mark.asyncio

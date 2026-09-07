@@ -68,10 +68,10 @@ class Pipeline:
         by_identity = {entry.canonical_id: entry for entry in existing}
         by_identity.update({entry.canonical_id: entry for entry in additions})
         all_entries = list(by_identity.values())
+        artifact = self.settings.dist_dir / "vtuber_dictionary.tsv"
         if additions:
             self.entries.replace(all_entries)
-            self.compiler.compile(all_entries, self.settings.dist_dir / "vtuber_dictionary.tsv")
-        elif all_entries and not (self.settings.dist_dir / "vtuber_dictionary.tsv").exists():
-            self.compiler.compile(all_entries, self.settings.dist_dir / "vtuber_dictionary.tsv")
+        if additions or not artifact.exists():
+            self.compiler.compile(all_entries, artifact)
         self.candidates.replace(candidates)
         return len(additions)

@@ -348,3 +348,36 @@ async def test_pipeline_compiles_only_verified_mocked_result(tmp_path: Path) -> 
     assert (dist_dir / "vtuber_dictionary.tsv").read_text(
         "utf-8"
     ) == "ほしまちすいせい\t星街すいせい\n"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_creates_empty_artifact_without_accepted_candidates(tmp_path: Path) -> None:
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics(youtube_subscribers=0)
+
+    class ShouldNotRun:
+        async def research(self, candidate: Candidate, metrics: AudienceMetrics) -> ResearchResult:
+            raise AssertionError("threshold filter should prevent research")
+
+        async def verify(
+            self, candidate: Candidate, research: ResearchResult, metrics: AudienceMetrics
+        ) -> VerificationResult:
+            raise AssertionError("threshold filter should prevent verification")
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidates.upsert(Candidate(display_name="below threshold", youtube_channel_id="UC123"))
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=ShouldNotRun(),
+        verifier=ShouldNotRun(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+    assert await pipeline.run() == 0
+    assert (dist_dir / "vtuber_dictionary.tsv").read_bytes() == b""

@@ -65,6 +65,8 @@ async def update(settings: Settings) -> int:
     researcher: ReadingResearcher
     verifier: Verifier
     if settings.openai_api_key:
+        if not settings.openai_model:
+            raise RuntimeError("OPENAI_MODEL is required when OPENAI_API_KEY is configured")
         runner = AgentFrameworkJsonRunner(
             settings.openai_api_key.get_secret_value(), settings.openai_model
         )

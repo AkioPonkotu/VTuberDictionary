@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
 
     openai_api_key: SecretStr | None = None
-    openai_model: str = "gpt-4.1-mini"
+    openai_model: str | None = None
     youtube_api_key: SecretStr | None = None
     twitch_client_id: str | None = None
     twitch_client_secret: SecretStr | None = None

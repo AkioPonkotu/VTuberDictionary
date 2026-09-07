@@ -211,11 +211,11 @@ def test_existing_entry_filter_uses_platform_metadata_when_id_changes() -> None:
     assert not ExistingEntryFilter([entry], 180).needs_research(candidate)
 
 
-def test_settings_uses_default_model_when_env_value_is_empty(
+def test_settings_keeps_model_unset_when_env_value_is_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPENAI_MODEL", "")
-    assert Settings(_env_file=None).openai_model == "gpt-4.1-mini"
+    assert Settings(_env_file=None).openai_model is None
 
 
 @pytest.mark.asyncio

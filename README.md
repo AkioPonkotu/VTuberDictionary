@@ -49,6 +49,8 @@ uv run mypy src
 
 `uv sync` は Microsoft Agent Framework の OpenAI provider もインストールします。Agent は OpenAI の hosted Web Search tool と Pydantic response format を指定して実行します。
 
+`OPENAI_MODEL` は必須です。利用するモデル名を環境変数またはGitHub Repository Variableに指定してください。
+
 ## 実行
 
 事務所は `data/agencies.json` に登録します（初期状態は空です）。事務所をコードへ埋め込まないため、追加・無効化はこのデータだけで行えます。

@@ -33,10 +33,26 @@ class ThresholdFilter:
 class ExistingEntryFilter:
     def __init__(self, entries: list[DictionaryEntry], reverify_after_days: int) -> None:
         self.entries = {entry.canonical_id: entry for entry in entries}
+        self.entries_by_platform_identity = {
+            key: entry
+            for entry in entries
+            for key in (
+                f"youtube:{entry.youtube_channel_id}" if entry.youtube_channel_id else None,
+                f"twitch:{entry.twitch_user_id}" if entry.twitch_user_id else None,
+            )
+            if key is not None
+        }
         self.reverify_after = timedelta(days=reverify_after_days)
 
     def needs_research(self, candidate: Candidate, today: datetime | None = None) -> bool:
-        existing = self.entries.get(candidate.canonical_id)
+        existing = self.entries.get(candidate.canonical_id) or next(
+            (
+                self.entries_by_platform_identity[key]
+                for key in candidate.identity_keys()
+                if key in self.entries_by_platform_identity
+            ),
+            None,
+        )
         if existing is None:
             return True
         today = today or datetime.now(UTC)

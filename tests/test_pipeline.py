@@ -173,6 +173,19 @@ def test_existing_entry_filter_uses_canonical_id_and_reverify_window() -> None:
     assert filter_.needs_research(candidate, entry.verified_at + timedelta(days=181))
 
 
+def test_existing_entry_filter_uses_platform_metadata_when_id_changes() -> None:
+    entry = DictionaryEntry(
+        canonical_id="prior-identity",
+        reading="よみ",
+        canonical_name="正式名",
+        youtube_channel_id="UC123",
+        source_urls=["https://official.example"],
+        verified_at=datetime.now(UTC),
+    )
+    candidate = Candidate(display_name="別表示", youtube_channel_id="UC123")
+    assert not ExistingEntryFilter([entry], 180).needs_research(candidate)
+
+
 @pytest.mark.asyncio
 async def test_research_and_verification_parse_structured_output() -> None:
     runner = FakeRunner(

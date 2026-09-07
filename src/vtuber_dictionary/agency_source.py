@@ -1,27 +1,47 @@
-"""Conservative HTML-based agency discovery for official talent-list pages."""
+"""Conservative official-site discovery for agency talent lists and sitemaps."""
 
 from __future__ import annotations
 
+import json
 import re
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from html import unescape
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
 from .domain import Agency, Candidate
-from .platforms import RetryingHttpClient, valid_twitch_login
+from .platforms import ApiError, RetryingHttpClient, valid_twitch_login
+
+
+@dataclass(frozen=True)
+class _Link:
+    url: str
+    name: str
 
 
 class _Links(HTMLParser):
+    """Collect anchors, including accessible labels and nested image alt text."""
+
     def __init__(self) -> None:
         super().__init__()
         self.current_url: str | None = None
         self.current_text: list[str] = []
-        self.links: list[tuple[str, str]] = []
+        self.links: list[_Link] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
         if tag == "a":
-            value = dict(attrs).get("href")
+            value = attributes.get("href")
             if value:
-                self.current_url, self.current_text = value, []
+                self.current_url = value
+                self.current_text = [
+                    value
+                    for value in (attributes.get("aria-label"), attributes.get("title"))
+                    if value
+                ]
+        elif self.current_url and tag == "img" and (alt := attributes.get("alt")):
+            self.current_text.append(alt)
 
     def handle_data(self, data: str) -> None:
         if self.current_url:
@@ -29,59 +49,201 @@ class _Links(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "a" and self.current_url:
-            self.links.append((self.current_url, " ".join(self.current_text).strip()))
+            self.links.append(_Link(self.current_url, " ".join(self.current_text).strip()))
             self.current_url = None
 
 
-class AgencyPageTalentSource:
-    """Extract same-site profile links from a configured official talent list.
+class _Title(HTMLParser):
+    """Read a profile's official title when its list card has no visible text."""
 
-    Agency pages vary widely, so links without useful visible text are ignored.
-    Extra agency-specific parsers can implement ``AgencyTalentSource`` without
-    altering the pipeline.
+    def __init__(self) -> None:
+        super().__init__()
+        self.values: list[str] = []
+        self.in_title = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "meta" and attributes.get("property") in {"og:title", "twitter:title"}:
+            if content := attributes.get("content"):
+                self.values.append(content)
+        elif tag == "title":
+            self.in_title = True
+
+    def handle_data(self, data: str) -> None:
+        if self.in_title:
+            self.values.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "title":
+            self.in_title = False
+
+    def first(self) -> str | None:
+        for value in self.values:
+            if normalized := " ".join(value.split()):
+                return normalized
+        return None
+
+
+class AgencyPageTalentSource:
+    """Extract official talent profiles without treating navigation as candidates.
+
+    A number of official rosters use image-only cards or client-side rendering.
+    We first inspect ordinary anchors, then a public Next.js roster payload, and
+    finally the agency's published sitemap. Every fallback remains constrained
+    to the configured official host and profile URL pattern.
     """
+
+    _MAX_SITEMAPS = 20
 
     def __init__(self, http: RetryingHttpClient | None = None) -> None:
         self.http = http or RetryingHttpClient()
 
     async def list_talents(self, agency: Agency) -> list[Candidate]:
         body = await self.http.get_text(agency.talent_list_url)
-        parser = _Links()
-        parser.feed(body)
-        allowed_host = urlparse(agency.official_url).netloc
-        profile_pattern = (
-            re.compile(agency.profile_url_pattern) if agency.profile_url_pattern else None
-        )
+        profiles = self._profile_links(agency, self._links(body))
+        profiles = self._merge_profile_links(profiles, self._next_data_profile_links(agency, body))
+        if not profiles:
+            profiles = await self._sitemap_profile_links(agency)
+
         candidates: list[Candidate] = []
-        for href, name in parser.links:
-            profile = urljoin(agency.talent_list_url, href)
-            if (
-                not name
-                or urlparse(profile).netloc != allowed_host
-                or (
-                    profile_pattern is not None
-                    and not profile_pattern.fullmatch(urlparse(profile).path)
-                )
-            ):
-                continue
+        for profile, name in profiles.items():
             candidate = Candidate(
-                display_name=name, agency=agency.name, official_profile_url=profile
+                display_name=name or profile,
+                agency=agency.name,
+                official_profile_url=profile,
             )
-            await self._add_official_platform_links(candidate)
+            title = await self._add_official_platform_links(candidate)
+            if not name:
+                if title is None:
+                    continue
+                candidate.display_name = title
             candidates.append(candidate)
         return candidates
 
-    async def _add_official_platform_links(self, candidate: Candidate) -> None:
-        """Use links embedded in the official profile as identity evidence."""
-        if not candidate.official_profile_url:
-            return
+    @staticmethod
+    def _links(body: str) -> list[_Link]:
         parser = _Links()
-        parser.feed(await self.http.get_text(candidate.official_profile_url))
-        for href, label in parser.links:
-            label = label.strip().casefold()
-            if label not in {"youtube", "twitch"}:
+        parser.feed(body)
+        return parser.links
+
+    @staticmethod
+    def _matches_profile(agency: Agency, profile: str) -> bool:
+        if urlparse(profile).netloc.casefold() != urlparse(agency.official_url).netloc.casefold():
+            return False
+        if agency.profile_url_pattern is None:
+            return True
+        return re.fullmatch(agency.profile_url_pattern, urlparse(profile).path) is not None
+
+    def _profile_links(self, agency: Agency, links: list[_Link]) -> dict[str, str]:
+        profiles: dict[str, str] = {}
+        for link in links:
+            profile = urljoin(agency.talent_list_url, link.url)
+            if self._matches_profile(agency, profile):
+                profiles.setdefault(profile, link.name)
+                if link.name:
+                    profiles[profile] = link.name
+        return profiles
+
+    @staticmethod
+    def _merge_profile_links(*groups: dict[str, str]) -> dict[str, str]:
+        merged: dict[str, str] = {}
+        for group in groups:
+            for profile, name in group.items():
+                if profile not in merged or (name and not merged[profile]):
+                    merged[profile] = name
+        return merged
+
+    def _next_data_profile_links(self, agency: Agency, body: str) -> dict[str, str]:
+        """Use the public `allLivers` payload emitted by Nijisanji's Next.js page."""
+        match = re.search(
+            r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', body, re.DOTALL
+        )
+        if not match:
+            return {}
+        try:
+            payload = json.loads(unescape(match.group(1)))
+            livers = payload["props"]["pageProps"]["allLivers"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return {}
+        if not isinstance(livers, list):
+            return {}
+
+        profiles: dict[str, str] = {}
+        for liver in livers:
+            if not isinstance(liver, dict):
                 continue
-            url = urljoin(candidate.official_profile_url, href).rstrip("/")
+            slug, name = liver.get("slug"), liver.get("name")
+            if not isinstance(slug, str) or not isinstance(name, str) or not slug or not name:
+                continue
+            profile = urljoin(agency.official_url, f"/talents/l/{slug}")
+            if self._matches_profile(agency, profile):
+                profiles[profile] = name.strip()
+        return profiles
+
+    async def _sitemap_profile_links(self, agency: Agency) -> dict[str, str]:
+        """Find profile URLs from an official sitemap when roster cards are not in HTML."""
+        profiles: dict[str, str] = {}
+        for sitemap_url in await self._sitemap_urls(agency):
+            try:
+                body = await self.http.get_text(sitemap_url)
+                root = ET.fromstring(body)
+            except (ApiError, ET.ParseError):
+                continue
+            if root.tag.rsplit("}", 1)[-1] == "sitemapindex":
+                continue
+            for element in root.iter():
+                if element.tag.rsplit("}", 1)[-1] != "loc" or not element.text:
+                    continue
+                location = element.text.strip()
+                if self._matches_profile(agency, location):
+                    profiles.setdefault(location, "")
+        return profiles
+
+    async def _sitemap_urls(self, agency: Agency) -> list[str]:
+        try:
+            robots = await self.http.get_text(urljoin(agency.official_url, "/robots.txt"))
+        except ApiError:
+            robots = ""
+        discovered = re.findall(r"(?im)^\s*sitemap:\s*(\S+)", robots)
+        if not discovered:
+            discovered = [
+                urljoin(agency.official_url, "/sitemap.xml"),
+                urljoin(agency.official_url, "/wp-sitemap.xml"),
+                urljoin(agency.official_url, "/sitemap_index.xml"),
+            ]
+
+        pending = list(dict.fromkeys(discovered))
+        seen: set[str] = set()
+        result: list[str] = []
+        while pending and len(seen) < self._MAX_SITEMAPS:
+            sitemap_url = pending.pop(0)
+            if sitemap_url in seen:
+                continue
+            seen.add(sitemap_url)
+            try:
+                body = await self.http.get_text(sitemap_url)
+                root = ET.fromstring(body)
+            except (ApiError, ET.ParseError):
+                continue
+            result.append(sitemap_url)
+            if root.tag.rsplit("}", 1)[-1] == "sitemapindex":
+                pending.extend(
+                    element.text.strip()
+                    for element in root.iter()
+                    if element.tag.rsplit("}", 1)[-1] == "loc" and element.text
+                )
+        return result
+
+    async def _add_official_platform_links(self, candidate: Candidate) -> str | None:
+        """Use profile links as identity evidence and return its official title."""
+        if not candidate.official_profile_url:
+            return None
+        body = await self.http.get_text(candidate.official_profile_url)
+        title_parser = _Title()
+        title_parser.feed(body)
+        for link in self._links(body):
+            label = link.name.strip().casefold()
+            url = urljoin(candidate.official_profile_url, link.url).rstrip("/")
             parsed = urlparse(url)
             host = parsed.netloc.casefold().removeprefix("www.")
             parts = [part for part in parsed.path.split("/") if part]
@@ -94,3 +256,4 @@ class AgencyPageTalentSource:
                 if login:
                     candidate.twitch_url = f"https://www.twitch.tv/{login}"
                     candidate.twitch_login = login
+        return title_parser.first()

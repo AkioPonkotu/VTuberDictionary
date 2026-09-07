@@ -117,6 +117,94 @@ async def test_agency_page_source_extracts_official_profile_platform_links() -> 
 
 
 @pytest.mark.asyncio
+async def test_agency_page_source_uses_image_alt_text_for_profile_name() -> None:
+    class FakeHttp:
+        async def get_text(self, url: str) -> str:
+            pages = {
+                "https://agency.example/talents": (
+                    '<a href="/talents/a"><img alt="画像タレント"></a>'
+                ),
+                "https://agency.example/talents/a": "<title>画像タレント | Agency</title>",
+            }
+            return pages[url]
+
+    source = AgencyPageTalentSource(http=FakeHttp())  # type: ignore[arg-type]
+    agency = Agency(
+        name="Agency",
+        official_url="https://agency.example",
+        talent_list_url="https://agency.example/talents",
+        profile_url_pattern=r"^/talents/[^/]+$",
+    )
+    [candidate] = await source.list_talents(agency)
+    assert candidate.display_name == "画像タレント"
+
+
+@pytest.mark.asyncio
+async def test_agency_page_source_discovers_image_only_rosters_from_sitemap() -> None:
+    class FakeHttp:
+        async def get_text(self, url: str) -> str:
+            pages = {
+                "https://agency.example/talents": "<main></main>",
+                "https://agency.example/robots.txt": "Sitemap: https://agency.example/sitemap.xml",
+                "https://agency.example/sitemap.xml": (
+                    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                    "<sitemap><loc>https://agency.example/talents-sitemap.xml</loc></sitemap>"
+                    "</sitemapindex>"
+                ),
+                "https://agency.example/talents-sitemap.xml": (
+                    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                    "<url><loc>https://agency.example/talents/a</loc></url>"
+                    "</urlset>"
+                ),
+                "https://agency.example/talents/a": (
+                    '<meta property="og:title" content="サイトマップ タレント">'
+                ),
+            }
+            return pages[url]
+
+    source = AgencyPageTalentSource(http=FakeHttp())  # type: ignore[arg-type]
+    agency = Agency(
+        name="Agency",
+        official_url="https://agency.example",
+        talent_list_url="https://agency.example/talents",
+        profile_url_pattern=r"^/talents/[^/]+$",
+    )
+    [candidate] = await source.list_talents(agency)
+    assert (candidate.display_name, candidate.official_profile_url) == (
+        "サイトマップ タレント",
+        "https://agency.example/talents/a",
+    )
+
+
+@pytest.mark.asyncio
+async def test_agency_page_source_reads_public_nextjs_roster_payload() -> None:
+    class FakeHttp:
+        async def get_text(self, url: str) -> str:
+            pages = {
+                "https://agency.example/talents": (
+                    '<script id="__NEXT_DATA__" type="application/json">'
+                    '{"props":{"pageProps":{"allLivers":['
+                    '{"slug":"talent-a","name":"構造化タレント"}]}}}</script>'
+                ),
+                "https://agency.example/talents/l/talent-a": "<title>構造化タレント</title>",
+            }
+            return pages[url]
+
+    source = AgencyPageTalentSource(http=FakeHttp())  # type: ignore[arg-type]
+    agency = Agency(
+        name="Agency",
+        official_url="https://agency.example",
+        talent_list_url="https://agency.example/talents",
+        profile_url_pattern=r"^/talents/l/[^/]+$",
+    )
+    [candidate] = await source.list_talents(agency)
+    assert (candidate.display_name, candidate.official_profile_url) == (
+        "構造化タレント",
+        "https://agency.example/talents/l/talent-a",
+    )
+
+
+@pytest.mark.asyncio
 async def test_twitch_discovery_filters_tag_case_insensitively() -> None:
     found = await TwitchDiscovery(FakeStreams(), "VTuber", "ja").discover()
     assert [(item.twitch_user_id, item.twitch_login) for item in found] == [("1", "one")]

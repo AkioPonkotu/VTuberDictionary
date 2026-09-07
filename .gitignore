@@ -1,0 +1,20 @@
+# Python environments and tooling
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local credentials and settings
+.env
+
+# Generated runtime files; committed fixtures use .gitkeep instead.
+data/*.jsonl
+dist/*.tsv
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/

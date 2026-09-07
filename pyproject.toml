@@ -1,0 +1,55 @@
+[project]
+name = "vtuber-dictionary"
+version = "0.1.0"
+description = "A verified, reproducible pipeline for Japanese VTuber IME dictionaries."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = { file = "LICENSE" }
+authors = [{ name = "AkioPonkotu" }]
+dependencies = [
+    "agent-framework-core>=1.17,<2",
+    "httpx>=0.28,<1",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.10,<3",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.18,<2",
+    "pytest>=8.4,<9",
+    "pytest-asyncio>=0.26,<1",
+    "pytest-cov>=6.2,<7",
+    "ruff>=0.12,<1",
+]
+
+[project.scripts]
+vtuber-dictionary = "vtuber_dictionary.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vtuber_dictionary"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --cov=vtuber_dictionary --cov-report=term-missing"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["vtuber_dictionary"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["vtuber_dictionary"]

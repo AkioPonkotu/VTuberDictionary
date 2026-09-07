@@ -95,5 +95,8 @@ def main() -> None:
     parser.add_argument("command", nargs="?", choices=["update"], default="update")
     parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    # httpx includes query strings in its INFO request logs.  API keys must never be logged.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpx2").setLevel(logging.WARNING)
     count = asyncio.run(update(Settings()))
     logging.getLogger(__name__).info("dictionary_update_complete", extra={"new_entries": count})

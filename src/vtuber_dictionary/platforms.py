@@ -46,7 +46,7 @@ class ClientRequestError(ApiError):
 
 class RetryingHttpClient:
     def __init__(self, timeout_seconds: float = 20, retries: int = 3) -> None:
-        self.client = httpx.AsyncClient(timeout=timeout_seconds)
+        self.client = httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True)
         self.retries = retries
 
     @staticmethod

@@ -84,6 +84,51 @@ class _Title(HTMLParser):
         return None
 
 
+class _RosterCards(HTMLParser):
+    """Collect name/YouTube pairs from official image-card rosters."""
+
+    _VOID_TAGS = {"area", "base", "br", "embed", "hr", "img", "input", "link", "meta", "source"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[str] = []
+        self.card_depth: int | None = None
+        self.name_depth: int | None = None
+        self.name: str | None = None
+        self.youtube_url: str | None = None
+        self.cards: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag not in self._VOID_TAGS:
+            self.stack.append(tag)
+        depth = len(self.stack)
+        classes = set((attributes.get("class") or "").split())
+        if self.card_depth is None and "member__profile" in classes:
+            self.card_depth, self.name, self.youtube_url = depth, None, None
+        if self.card_depth is None:
+            return
+        if "member__name" in classes:
+            self.name_depth = depth
+        if tag == "img" and self.name_depth is not None and (alt := attributes.get("alt")):
+            self.name = alt.strip()
+        if tag == "a" and (href := attributes.get("href")):
+            parsed = urlparse(href)
+            if parsed.netloc.casefold().removeprefix("www.") in {"youtube.com", "m.youtube.com"}:
+                self.youtube_url = href
+
+    def handle_endtag(self, tag: str) -> None:
+        depth = len(self.stack)
+        if self.card_depth is not None and depth == self.card_depth and tag == self.stack[-1]:
+            if self.name and self.youtube_url:
+                self.cards.append((self.name, self.youtube_url))
+            self.card_depth, self.name_depth = None, None
+        elif self.name_depth is not None and depth == self.name_depth and tag == self.stack[-1]:
+            self.name_depth = None
+        if tag not in self._VOID_TAGS and self.stack:
+            self.stack.pop()
+
+
 class AgencyPageTalentSource:
     """Extract official talent profiles without treating navigation as candidates.
 
@@ -103,6 +148,8 @@ class AgencyPageTalentSource:
         profiles = self._profile_links(agency, self._links(body))
         profiles = self._merge_profile_links(profiles, self._next_data_profile_links(agency, body))
         if not profiles:
+            if card_candidates := self._roster_card_candidates(agency, body):
+                return card_candidates
             profiles = await self._sitemap_profile_links(agency)
 
         candidates: list[Candidate] = []
@@ -152,6 +199,25 @@ class AgencyPageTalentSource:
                 if profile not in merged or (name and not merged[profile]):
                     merged[profile] = name
         return merged
+
+    @staticmethod
+    def _roster_card_candidates(agency: Agency, body: str) -> list[Candidate]:
+        parser = _RosterCards()
+        parser.feed(body)
+        candidates: list[Candidate] = []
+        for name, youtube_url in parser.cards:
+            url = youtube_url.rstrip("/")
+            parts = [part for part in urlparse(url).path.split("/") if part]
+            channel_id = parts[1] if len(parts) >= 2 and parts[0] == "channel" else None
+            candidates.append(
+                Candidate(
+                    display_name=name,
+                    agency=agency.name,
+                    youtube_channel_id=channel_id,
+                    youtube_channel_url=url,
+                )
+            )
+        return candidates
 
     def _next_data_profile_links(self, agency: Agency, body: str) -> dict[str, str]:
         """Use the public `allLivers` payload emitted by Nijisanji's Next.js page."""

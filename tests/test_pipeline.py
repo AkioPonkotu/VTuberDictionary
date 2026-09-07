@@ -205,6 +205,28 @@ async def test_agency_page_source_reads_public_nextjs_roster_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agency_page_source_reads_official_image_card_roster() -> None:
+    class FakeHttp:
+        async def get_text(self, url: str) -> str:
+            assert url == "https://agency.example/members"
+            return (
+                '<div class="member__profile"><p class="member__name">'
+                '<img alt="カード タレント"></p>'
+                '<a href="https://www.youtube.com/channel/UC123">YouTube</a></div>'
+            )
+
+    source = AgencyPageTalentSource(http=FakeHttp())  # type: ignore[arg-type]
+    agency = Agency(
+        name="Agency",
+        official_url="https://agency.example",
+        talent_list_url="https://agency.example/members",
+        profile_url_pattern=r"^/members/[^/]+$",
+    )
+    [candidate] = await source.list_talents(agency)
+    assert (candidate.display_name, candidate.youtube_channel_id) == ("カード タレント", "UC123")
+
+
+@pytest.mark.asyncio
 async def test_twitch_discovery_filters_tag_case_insensitively() -> None:
     found = await TwitchDiscovery(FakeStreams(), "VTuber", "ja").discover()
     assert [(item.twitch_user_id, item.twitch_login) for item in found] == [("1", "one")]
@@ -273,6 +295,11 @@ async def test_http_client_classifies_authentication_failure() -> None:
     with pytest.raises(AuthenticationError):
         await client.get_json("https://example.test")
     await client.aclose()
+
+
+def test_http_client_follows_official_site_redirects() -> None:
+    client = RetryingHttpClient()
+    assert client.client.follow_redirects
 
 
 @pytest.mark.asyncio

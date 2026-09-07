@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
@@ -48,10 +49,20 @@ class AgencyPageTalentSource:
         parser = _Links()
         parser.feed(body)
         allowed_host = urlparse(agency.official_url).netloc
+        profile_pattern = (
+            re.compile(agency.profile_url_pattern) if agency.profile_url_pattern else None
+        )
         candidates: list[Candidate] = []
         for href, name in parser.links:
             profile = urljoin(agency.talent_list_url, href)
-            if not name or urlparse(profile).netloc != allowed_host:
+            if (
+                not name
+                or urlparse(profile).netloc != allowed_host
+                or (
+                    profile_pattern is not None
+                    and not profile_pattern.fullmatch(urlparse(profile).path)
+                )
+            ):
                 continue
             candidate = Candidate(
                 display_name=name, agency=agency.name, official_profile_url=profile

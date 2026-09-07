@@ -59,10 +59,13 @@ uv run mypy src
     "name": "Example Agency",
     "official_url": "https://example.com",
     "talent_list_url": "https://example.com/talents",
+    "profile_url_pattern": "^/talents/[^/]+/$",
     "active": true
   }
 ]
 ```
+
+`profile_url_pattern` は任意です。タレント以外のナビゲーションリンクを候補にしないため、公式サイトのプロフィールURL形式が分かる場合は指定します。
 
 ```powershell
 uv run vtuber-dictionary update

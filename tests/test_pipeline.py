@@ -69,7 +69,9 @@ async def test_agency_page_source_extracts_official_profile_platform_links() -> 
     class FakeHttp:
         async def get_text(self, url: str) -> str:
             pages = {
-                "https://agency.example/talents": '<a href="/talents/a">公式 タレント</a>',
+                "https://agency.example/talents": (
+                    '<a href="/news">お知らせ</a><a href="/talents/a">公式 タレント</a>'
+                ),
                 "https://agency.example/talents/a": (
                     '<a href="https://www.youtube.com/channel/UC123">YouTube</a>'
                     '<a href="https://www.twitch.tv/example">Twitch</a>'
@@ -82,6 +84,7 @@ async def test_agency_page_source_extracts_official_profile_platform_links() -> 
         name="Agency",
         official_url="https://agency.example",
         talent_list_url="https://agency.example/talents",
+        profile_url_pattern=r"^/talents/[^/]+$",
     )
     [candidate] = await source.list_talents(agency)
     assert (candidate.youtube_channel_id, candidate.twitch_login) == ("UC123", "example")

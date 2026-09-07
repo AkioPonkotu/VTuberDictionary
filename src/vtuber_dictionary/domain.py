@@ -57,6 +57,7 @@ class Agency(BaseModel):
     name: str
     official_url: str
     talent_list_url: str
+    profile_url_pattern: str | None = None
     last_checked_at: datetime | None = None
     active: bool = True
 

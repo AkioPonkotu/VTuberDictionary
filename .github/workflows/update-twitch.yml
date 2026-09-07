@@ -1,0 +1,81 @@
+name: Update dictionary from Twitch
+
+on:
+  schedule:
+    # Every four hours at :23 UTC, avoiding the start-of-hour schedule peak.
+    - cron: "23 */4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# The Twitch and agency workflows both update the same versioned state.
+concurrency:
+  group: dictionary-update
+  queue: max
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment: dictionary-update
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.2"
+          enable-cache: true
+      - run: uv sync --all-groups --locked
+      - run: uv run pytest
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - name: Run Twitch discovery and safe update pipeline
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          YOUTUBE_MIN_SUBSCRIBERS: ${{ vars.YOUTUBE_MIN_SUBSCRIBERS || '10000' }}
+          TWITCH_MIN_FOLLOWERS: ${{ vars.TWITCH_MIN_FOLLOWERS || '5000' }}
+          AUDIENCE_THRESHOLD_MODE: ${{ vars.AUDIENCE_THRESHOLD_MODE || 'any' }}
+          REVERIFY_AFTER_DAYS: ${{ vars.REVERIFY_AFTER_DAYS || '180' }}
+          TWITCH_DISCOVERY_ENABLED: ${{ vars.TWITCH_DISCOVERY_ENABLED || 'true' }}
+          TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
+          TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
+          TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
+        run: uv run vtuber-dictionary update --source twitch
+      - name: Detect dictionary changes
+        id: dictionary
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain -- dist/vtuber_dictionary.tsv)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit changed canonical data and artifact
+        id: commit
+        shell: bash
+        run: |
+          git add -A data dist
+          if git diff --cached --quiet; then
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update VTuber dictionary from Twitch"
+          git push
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Publish changed IME dictionary as a GitHub Release
+        if: steps.dictionary.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
+        shell: bash
+        run: |
+          tag="dictionary-$(date -u '+%Y%m%d-%H%M%S')-${GITHUB_RUN_ID}"
+          gh release create "$tag" dist/vtuber_dictionary.tsv \
+            --target "$COMMIT_SHA" \
+            --title "VTuber IME dictionary ${tag#dictionary-}" \
+            --notes "Automated dictionary update from Twitch live discovery."

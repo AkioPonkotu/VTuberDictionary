@@ -73,7 +73,12 @@ uv run mypy src
 
 ```powershell
 uv run vtuber-dictionary update
+# 取得元を限定する場合
+uv run vtuber-dictionary update --source agency
+uv run vtuber-dictionary update --source twitch
 ```
+
+`--source` は複数回指定できます。指定しない場合は従来どおり事務所・Twitch の両方を取得します。これは候補の**発見元**だけを限定するオプションで、既存候補の YouTube/Twitch 統計による検証は維持されます。
 
 OpenAI の認証情報がない場合も、閾値に達した候補が現れるまで候補収集は実行できます。その候補を調査・採用する段階で停止するため、未検証の情報が辞書へ入ることはありません。
 
@@ -99,7 +104,14 @@ Twitch Discovery は Helix の **Get Streams** をページングして `VTuber`
 
 ## GitHub Actions
 
-`.github/workflows/update-dictionary.yml` は 6 時間ごとの schedule と手動 `workflow_dispatch` で unit test と更新を実行します。Secrets に `OPENAI_API_KEY`、`YOUTUBE_API_KEY`、`TWITCH_CLIENT_ID`、`TWITCH_CLIENT_SECRET` を設定してください。fork からの pull request では secrets を使う更新ジョブを実行しません。更新中の API エラーは失敗として終了するため、既存の `dist` を不完全な内容で上書きしません。
+定期更新は次の二つの workflow に分かれています。いずれも `workflow_dispatch` で手動実行もできます。
+
+| Workflow | スケジュール | 取得元 |
+| --- | --- | --- |
+| `.github/workflows/update-agencies.yml` | 毎週月曜 10:13 JST（01:13 UTC） | 登録済み事務所の公式プロフィール |
+| `.github/workflows/update-twitch.yml` | 4時間ごと、毎時 :23 UTC | Twitch のライブ配信（`VTuber` タグ） |
+
+二つの workflow は共通のキューで直列化されるため、同じ `data` と `dist` への競合コミットを避けます。辞書 TSV に変更があった実行だけが、日時と workflow run ID を含む一意なタグの GitHub Release を作成し、`vtuber_dictionary.tsv` を添付します。Secrets に `OPENAI_API_KEY`、`YOUTUBE_API_KEY`、`TWITCH_CLIENT_ID`、`TWITCH_CLIENT_SECRET` を設定してください。更新中の API エラーは失敗として終了するため、既存の `dist` を不完全な内容で上書きしません。
 
 ## テストと貢献
 

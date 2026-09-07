@@ -70,6 +70,25 @@ async def test_agency_discovery_marks_candidates_without_verifying() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agency_discovery_discards_shared_platform_links() -> None:
+    class SharedChannelAgencySource:
+        async def list_talents(self, agency: Agency) -> list[Candidate]:
+            return [
+                Candidate(display_name="A", youtube_channel_id="shared"),
+                Candidate(display_name="B", youtube_channel_id="shared"),
+            ]
+
+    agency = Agency(
+        name="Agency", official_url="https://example.com", talent_list_url="https://example.com/t"
+    )
+    found = await AgencyDiscovery(SharedChannelAgencySource()).discover([agency])
+    assert [(item.youtube_channel_id, item.youtube_channel_url) for item in found] == [
+        (None, None),
+        (None, None),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_agency_page_source_extracts_official_profile_platform_links() -> None:
     class FakeHttp:
         async def get_text(self, url: str) -> str:
@@ -119,6 +138,24 @@ async def test_youtube_client_collects_official_channel_metadata() -> None:
     candidate = Candidate(display_name="candidate", youtube_channel_id="channel-id")
     metrics = await YouTubeDataClient("key", http=FakeHttp()).audience_metrics(candidate)  # type: ignore[arg-type]
     assert (metrics.youtube_title, metrics.youtube_subscribers) == ("公式名", 10_000)
+
+
+@pytest.mark.asyncio
+async def test_youtube_client_strips_query_from_official_handle() -> None:
+    class FakeHttp:
+        def __init__(self) -> None:
+            self.params: dict[str, str] | None = None
+
+        async def get_json(self, url: str, **kwargs: object) -> dict[str, object]:
+            self.params = kwargs["params"]  # type: ignore[assignment]
+            return {"items": []}
+
+    http = FakeHttp()
+    candidate = Candidate(
+        display_name="candidate", youtube_channel_url="https://youtube.com/@candidate?sub_confirmation=1"
+    )
+    await YouTubeDataClient("key", http=http).audience_metrics(candidate)  # type: ignore[arg-type]
+    assert http.params is not None and http.params["forHandle"] == "candidate"
 
 
 @pytest.mark.asyncio

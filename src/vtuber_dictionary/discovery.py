@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import cast
 
 from .domain import Agency, Candidate, now
@@ -16,12 +17,34 @@ class AgencyDiscovery:
     async def discover(self, agencies: list[Agency]) -> list[Candidate]:
         found: list[Candidate] = []
         for agency in agencies:
-            for candidate in await self.source.list_talents(agency):
+            candidates = await self.source.list_talents(agency)
+            self._discard_shared_platform_links(candidates)
+            for candidate in candidates:
                 candidate.agency = candidate.agency or agency.name
                 candidate.discovery_sources.add("agency")
                 found.append(candidate)
             agency.last_checked_at = now()
         return found
+
+    @staticmethod
+    def _discard_shared_platform_links(candidates: list[Candidate]) -> None:
+        """Do not attribute an agency-wide platform account to individual talents."""
+        for id_field, url_field in (
+            ("youtube_channel_id", "youtube_channel_url"),
+            ("twitch_user_id", "twitch_url"),
+        ):
+            keys = [
+                getattr(candidate, id_field) or getattr(candidate, url_field)
+                for candidate in candidates
+            ]
+            duplicated = {
+                key for key, count in Counter(key for key in keys if key).items() if count > 1
+            }
+            for candidate in candidates:
+                key = getattr(candidate, id_field) or getattr(candidate, url_field)
+                if key in duplicated:
+                    setattr(candidate, id_field, None)
+                    setattr(candidate, url_field, None)
 
 
 class TwitchDiscovery:

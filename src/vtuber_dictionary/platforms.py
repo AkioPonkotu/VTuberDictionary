@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from typing import Any, Literal, cast
+from urllib.parse import urlparse
 
 import httpx
 
@@ -188,8 +189,11 @@ class YouTubeDataClient:
         params = {"part": "snippet,statistics", "key": self.api_key}
         if candidate.youtube_channel_id:
             params["id"] = candidate.youtube_channel_id
-        elif candidate.youtube_channel_url and "/@" in candidate.youtube_channel_url:
-            params["forHandle"] = candidate.youtube_channel_url.rsplit("/@", maxsplit=1)[1]
+        elif candidate.youtube_channel_url:
+            parsed = urlparse(candidate.youtube_channel_url)
+            if "/@" not in parsed.path:
+                return AudienceMetrics()
+            params["forHandle"] = parsed.path.rsplit("/@", maxsplit=1)[1]
         else:
             return AudienceMetrics()
         data = await self.http.get_json(

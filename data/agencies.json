@@ -1,1 +1,143 @@
-[{"name": "hololive production", "official_url": "https://hololive.hololivepro.com", "talent_list_url": "https://hololive.hololivepro.com/talents", "profile_url_pattern": "^/talents/[^/]+/$", "last_checked_at": "2026-09-07T07:04:12.446792Z", "active": true}]
+[
+  {
+    "name": "hololive production",
+    "official_url": "https://hololive.hololivepro.com",
+    "talent_list_url": "https://hololive.hololivepro.com/talents",
+    "profile_url_pattern": "^/talents/[^/]+/?$",
+    "last_checked_at": "2026-09-07T07:04:12.446792Z",
+    "active": true
+  },
+  {
+    "name": "にじさんじ",
+    "official_url": "https://www.nijisanji.jp",
+    "talent_list_url": "https://www.nijisanji.jp/talents",
+    "profile_url_pattern": "^/talents/[a-z]/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "ぶいすぽっ！",
+    "official_url": "https://vspo.jp",
+    "talent_list_url": "https://vspo.jp/member/",
+    "profile_url_pattern": "^/member/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "Neo-Porte",
+    "official_url": "https://neo-porte.jp",
+    "talent_list_url": "https://neo-porte.jp/member/",
+    "profile_url_pattern": "^/member/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "ななしいんく",
+    "official_url": "https://www.774.ai",
+    "talent_list_url": "https://www.774.ai/talents",
+    "profile_url_pattern": "^/talents/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "あおぎり高校",
+    "official_url": "https://aogirihighschool.com",
+    "talent_list_url": "https://aogirihighschool.com/aogirihighschool/members/",
+    "profile_url_pattern": "^/aogirihighschool/members/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "VEE",
+    "official_url": "https://vee-official.jp",
+    "talent_list_url": "https://vee-official.jp/talent/",
+    "profile_url_pattern": "^/talent/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "KAMITSUBAKI STUDIO",
+    "official_url": "https://kamitsubaki.jp",
+    "talent_list_url": "https://kamitsubaki.jp/artist/",
+    "profile_url_pattern": "^/artist/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "RIOT MUSIC",
+    "official_url": "https://riot-music.com",
+    "talent_list_url": "https://riot-music.com/artist/",
+    "profile_url_pattern": "^/artist/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "Re:AcT",
+    "official_url": "https://www.v-react.com",
+    "talent_list_url": "https://www.v-react.com/",
+    "profile_url_pattern": "^/talent/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "V4Mirai",
+    "official_url": "https://v4mirai.com",
+    "talent_list_url": "https://v4mirai.com/talent/",
+    "profile_url_pattern": "^/talent/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "globie",
+    "official_url": "https://globie.net",
+    "talent_list_url": "https://globie.net/talents/",
+    "profile_url_pattern": "^/talent/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "FIRST STAGE PRODUCTION",
+    "official_url": "https://firststage-pro.com",
+    "talent_list_url": "https://firststage-pro.com/talents/",
+    "profile_url_pattern": "^/talents/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "アステリズム",
+    "official_url": "https://asterism.love",
+    "talent_list_url": "https://asterism.love/talent/",
+    "profile_url_pattern": "^/talent/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "ぶいわんproduction",
+    "official_url": "https://www.vonepro.com",
+    "talent_list_url": "https://www.vonepro.com/talent/",
+    "profile_url_pattern": "^/talent/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "ヴートプロダクション",
+    "official_url": "https://www.vootproduction.com",
+    "talent_list_url": "https://www.vootproduction.com/talents",
+    "profile_url_pattern": "^/talents/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "ビバップ高校",
+    "official_url": "https://vhs-city.com",
+    "talent_list_url": "https://vhs-city.com/vebophighschool/talents/",
+    "profile_url_pattern": "^/vebophighschool/talents/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "ひんこプロダクション",
+    "official_url": "https://hin-pro.com",
+    "talent_list_url": "https://hin-pro.com/talent",
+    "profile_url_pattern": "^/talent/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": ".LIVE",
+    "official_url": "https://www.dotlive.jp",
+    "talent_list_url": "https://www.dotlive.jp/member/",
+    "profile_url_pattern": "^/member/[^/]+/?$",
+    "active": true
+  },
+  {
+    "name": "drop production",
+    "official_url": "https://dropro.jp",
+    "talent_list_url": "https://dropro.jp/",
+    "profile_url_pattern": "^/talent-[^/]+/?$",
+    "active": true
+  }
+]

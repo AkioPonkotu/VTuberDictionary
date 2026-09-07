@@ -1,9 +1,1 @@
-[
-  {
-    "name": "hololive production",
-    "official_url": "https://hololive.hololivepro.com",
-    "talent_list_url": "https://hololive.hololivepro.com/talents",
-    "profile_url_pattern": "^/talents/[^/]+/$",
-    "active": true
-  }
-]
+[{"name": "hololive production", "official_url": "https://hololive.hololivepro.com", "talent_list_url": "https://hololive.hololivepro.com/talents", "profile_url_pattern": "^/talents/[^/]+/$", "last_checked_at": "2026-09-07T06:43:32.100243Z", "active": true}]

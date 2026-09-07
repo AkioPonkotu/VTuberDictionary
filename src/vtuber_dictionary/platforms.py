@@ -224,10 +224,15 @@ class CombinedPlatformClient:
             self.youtube.audience_metrics(candidate) if self.youtube else _empty(),
             self.twitch.audience_metrics(candidate) if self.twitch else _empty(),
         )
-        return AudienceMetrics(
-            **youtube.model_dump(),
-            **{key: value for key, value in twitch.model_dump().items() if value is not None},
+        payload = youtube.model_dump()
+        payload.update(
+            {
+                "twitch_followers": twitch.twitch_followers,
+                "twitch_display_name": twitch.twitch_display_name,
+                "twitch_description": twitch.twitch_description,
+            }
         )
+        return AudienceMetrics(**payload)
 
 
 async def _empty() -> AudienceMetrics:

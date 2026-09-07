@@ -20,7 +20,12 @@ from vtuber_dictionary.domain import (
     VerificationResult,
 )
 from vtuber_dictionary.filtering import ExistingEntryFilter, ThresholdFilter
-from vtuber_dictionary.platforms import AuthenticationError, RetryingHttpClient, YouTubeDataClient
+from vtuber_dictionary.platforms import (
+    AuthenticationError,
+    CombinedPlatformClient,
+    RetryingHttpClient,
+    YouTubeDataClient,
+)
 from vtuber_dictionary.repository import CandidateRepository, EntryRepository, ReviewRepository
 from vtuber_dictionary.settings import Settings
 from vtuber_dictionary.validation import DeterministicValidator
@@ -74,6 +79,7 @@ async def test_agency_page_source_extracts_official_profile_platform_links() -> 
                 ),
                 "https://agency.example/talents/a": (
                     '<a href="https://www.youtube.com/channel/UC123">YouTube</a>'
+                    '<a href="https://www.youtube.com/channel/WRONG">Featured video</a>'
                     '<a href="https://www.twitch.tv/example">Twitch</a>'
                 ),
             }
@@ -129,6 +135,22 @@ async def test_http_client_classifies_authentication_failure() -> None:
     with pytest.raises(AuthenticationError):
         await client.get_json("https://example.test")
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_combined_metrics_preserves_platform_specific_fields() -> None:
+    class YouTube:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics(youtube_subscribers=10_000, youtube_hidden=False)
+
+    class Twitch:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics(twitch_followers=5_000, twitch_display_name="Twitch Name")
+
+    metrics = await CombinedPlatformClient(YouTube(), Twitch()).audience_metrics(  # type: ignore[arg-type]
+        Candidate(display_name="candidate")
+    )
+    assert (metrics.youtube_subscribers, metrics.twitch_followers) == (10_000, 5_000)
 
 
 def test_candidate_repository_deduplicates_only_explicit_identity(tmp_path: Path) -> None:

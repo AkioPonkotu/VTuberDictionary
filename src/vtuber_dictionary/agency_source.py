@@ -77,15 +77,18 @@ class AgencyPageTalentSource:
             return
         parser = _Links()
         parser.feed(await self.http.get_text(candidate.official_profile_url))
-        for href, _ in parser.links:
+        for href, label in parser.links:
+            label = label.strip().casefold()
+            if label not in {"youtube", "twitch"}:
+                continue
             url = urljoin(candidate.official_profile_url, href).rstrip("/")
             parsed = urlparse(url)
             host = parsed.netloc.casefold().removeprefix("www.")
             parts = [part for part in parsed.path.split("/") if part]
-            if host in {"youtube.com", "m.youtube.com"}:
+            if label == "youtube" and host in {"youtube.com", "m.youtube.com"}:
                 candidate.youtube_channel_url = url
                 if len(parts) >= 2 and parts[0] == "channel":
                     candidate.youtube_channel_id = parts[1]
-            elif host == "twitch.tv" and parts:
+            elif label == "twitch" and host == "twitch.tv" and parts:
                 candidate.twitch_url = url
                 candidate.twitch_login = parts[0]

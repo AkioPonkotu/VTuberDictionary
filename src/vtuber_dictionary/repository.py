@@ -40,16 +40,26 @@ class CandidateRepository:
         _write_jsonl_atomic(self.path, candidates)
 
     def upsert(self, incoming: Candidate) -> Candidate:
+        return self.upsert_many([incoming])[0]
+
+    def upsert_many(self, incoming_values: Iterable[Candidate]) -> list[Candidate]:
+        incoming_list = list(incoming_values)
+        if not incoming_list:
+            return []
         candidates = self.all()
+        stored = [self._upsert(candidates, incoming) for incoming in incoming_list]
+        self.replace(candidates)
+        return stored
+
+    @staticmethod
+    def _upsert(candidates: list[Candidate], incoming: Candidate) -> Candidate:
         matches = [item for item in candidates if item.identity_keys() & incoming.identity_keys()]
         if len(matches) > 1:
             incoming.status = CandidateStatus.REVIEW_REQUIRED
             candidates.append(incoming)
-            self.replace(candidates)
             return incoming
         if not matches:
             candidates.append(incoming)
-            self.replace(candidates)
             return incoming
         existing = matches[0]
         for field in (
@@ -65,7 +75,6 @@ class CandidateRepository:
                 setattr(existing, field, getattr(incoming, field))
         existing.discovery_sources |= incoming.discovery_sources
         existing.last_seen_at = incoming.last_seen_at
-        self.replace(candidates)
         return existing
 
 

@@ -73,4 +73,4 @@ class TwitchDiscovery:
 async def persist_discoveries(
     repository: CandidateRepository, candidates: list[Candidate]
 ) -> list[Candidate]:
-    return [repository.upsert(candidate) for candidate in candidates]
+    return repository.upsert_many(candidates)

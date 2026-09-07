@@ -203,6 +203,19 @@ def test_candidate_repository_deduplicates_only_explicit_identity(tmp_path: Path
     )
 
 
+def test_candidate_repository_batch_upserts_once(tmp_path: Path) -> None:
+    repo = CandidateRepository(tmp_path / "candidates.jsonl")
+    stored = repo.upsert_many(
+        [
+            Candidate(display_name="first", youtube_channel_id="channel-1"),
+            Candidate(display_name="same identity", youtube_channel_id="channel-1"),
+            Candidate(display_name="second", youtube_channel_id="channel-2"),
+        ]
+    )
+    assert [item.display_name for item in repo.all()] == ["first", "second"]
+    assert stored[0].canonical_id == stored[1].canonical_id
+
+
 def test_ambiguous_identity_is_review_required(tmp_path: Path) -> None:
     repo = CandidateRepository(tmp_path / "candidates.jsonl")
     repo.upsert(Candidate(display_name="A", youtube_channel_id="youtube-a"))

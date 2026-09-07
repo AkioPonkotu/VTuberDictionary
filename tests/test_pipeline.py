@@ -245,6 +245,21 @@ def test_validator_rejects_conflicting_duplicate_reading() -> None:
     assert entry is None and reason == "reading collides with a different canonical name"
 
 
+def test_validator_requires_agents_to_agree_on_resolved_reading() -> None:
+    candidate = Candidate(display_name="X")
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="reading")
+    ]
+    research = ResearchResult(
+        canonical_name="X", reading="えっくす", confidence=1, evidence=evidence, status="resolved"
+    )
+    verification = VerificationResult(
+        verified=True, canonical_name="X", reading="えくす", confidence=1, evidence=evidence
+    )
+    entry, reason = DeterministicValidator().validate(candidate, research, verification, [])
+    assert entry is None and reason == "research and verification results disagree"
+
+
 @pytest.mark.asyncio
 async def test_pipeline_compiles_only_verified_mocked_result(tmp_path: Path) -> None:
     class Metrics:

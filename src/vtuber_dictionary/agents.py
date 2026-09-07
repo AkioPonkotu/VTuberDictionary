@@ -70,13 +70,16 @@ Use web search where available. Prefer official agency profiles, the creator's o
 YouTube/Twitch descriptions, then official social accounts. Do not infer a Japanese reading from
 kanji or romanisation. Return only a JSON object matching: canonical_name (string|null), reading
 (string|null, hiragana only), confidence (0..1), evidence ([{url,source_type,claim}]), and status
-(resolved|unresolved). A non-official wiki alone cannot resolve a reading."""
+(resolved|unresolved). Use source_type values official_agency_profile, official_profile,
+official_website, youtube_about, twitch_about, official_social, or other. A non-official wiki
+alone cannot resolve a reading."""
 
 VERIFY_INSTRUCTIONS = """You are VerificationAgent, independent of a prior researcher.
 Independently use web search to check one VTuber's identity, formal name, reading, and cited URLs.
 Do not approve merely because the researcher claims it. Return only a JSON object matching:
 verified (boolean), canonical_name (string|null), reading (string|null), confidence (0..1),
-evidence ([{url,source_type,claim}]), issues ([string])."""
+evidence ([{url,source_type,claim}]), issues ([string]). Use the same source_type vocabulary as
+the research agent and explain disagreement in issues."""
 
 
 def _candidate_context(candidate: Candidate, metrics: AudienceMetrics) -> str:

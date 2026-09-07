@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from vtuber_dictionary.agency_source import AgencyPageTalentSource
 from vtuber_dictionary.agents import ReadingResearchAgent, VerificationAgent
 from vtuber_dictionary.dictionary import DictionaryCompiler
 from vtuber_dictionary.discovery import AgencyDiscovery, TwitchDiscovery
@@ -20,8 +21,10 @@ from vtuber_dictionary.domain import (
 )
 from vtuber_dictionary.filtering import ExistingEntryFilter, ThresholdFilter
 from vtuber_dictionary.platforms import AuthenticationError, RetryingHttpClient, YouTubeDataClient
-from vtuber_dictionary.repository import CandidateRepository
+from vtuber_dictionary.repository import CandidateRepository, EntryRepository, ReviewRepository
+from vtuber_dictionary.settings import Settings
 from vtuber_dictionary.validation import DeterministicValidator
+from vtuber_dictionary.workflow import Pipeline
 
 
 class FakeAgencySource:
@@ -44,8 +47,10 @@ class FakeStreams:
 class FakeRunner:
     def __init__(self, responses: list[str]) -> None:
         self.responses = responses
+        self.response_models: list[type[object]] = []
 
     async def run_json(self, instructions: str, prompt: str, response_model: type[object]) -> str:
+        self.response_models.append(response_model)
         return self.responses.pop(0)
 
 
@@ -57,6 +62,29 @@ async def test_agency_discovery_marks_candidates_without_verifying() -> None:
     found = await AgencyDiscovery(FakeAgencySource()).discover([agency])
     assert found[0].agency == "Agency"
     assert found[0].discovery_sources == {"agency"}
+
+
+@pytest.mark.asyncio
+async def test_agency_page_source_extracts_official_profile_platform_links() -> None:
+    class FakeHttp:
+        async def get_text(self, url: str) -> str:
+            pages = {
+                "https://agency.example/talents": '<a href="/talents/a">公式 タレント</a>',
+                "https://agency.example/talents/a": (
+                    '<a href="https://www.youtube.com/channel/UC123">YouTube</a>'
+                    '<a href="https://www.twitch.tv/example">Twitch</a>'
+                ),
+            }
+            return pages[url]
+
+    source = AgencyPageTalentSource(http=FakeHttp())  # type: ignore[arg-type]
+    agency = Agency(
+        name="Agency",
+        official_url="https://agency.example",
+        talent_list_url="https://agency.example/talents",
+    )
+    [candidate] = await source.list_talents(agency)
+    assert (candidate.youtube_channel_id, candidate.twitch_login) == ("UC123", "example")
 
 
 @pytest.mark.asyncio
@@ -157,6 +185,7 @@ async def test_research_and_verification_parse_structured_output() -> None:
     research = await ReadingResearchAgent(runner).research(candidate, metrics)
     verified = await VerificationAgent(runner).verify(candidate, research, metrics)
     assert research.status == "resolved" and verified.verified
+    assert runner.response_models == [ResearchResult, VerificationResult]
 
 
 def test_deterministic_validator_and_compiler(tmp_path: Path) -> None:
@@ -214,3 +243,55 @@ def test_validator_rejects_conflicting_duplicate_reading() -> None:
     )
     entry, reason = DeterministicValidator().validate(candidate, research, verification, [existing])
     assert entry is None and reason == "reading collides with a different canonical name"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_compiles_only_verified_mocked_result(tmp_path: Path) -> None:
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics(youtube_subscribers=10_000)
+
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="reading")
+    ]
+
+    class Researcher:
+        async def research(self, candidate: Candidate, metrics: AudienceMetrics) -> ResearchResult:
+            return ResearchResult(
+                canonical_name="星街すいせい",
+                reading="ほしまちすいせい",
+                confidence=1,
+                evidence=evidence,
+                status="resolved",
+            )
+
+    class Verifier:
+        async def verify(
+            self, candidate: Candidate, research: ResearchResult, metrics: AudienceMetrics
+        ) -> VerificationResult:
+            return VerificationResult(
+                verified=True,
+                canonical_name=research.canonical_name,
+                reading=research.reading,
+                confidence=1,
+                evidence=evidence,
+            )
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidates.upsert(Candidate(display_name="星街すいせい", youtube_channel_id="UC123"))
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=Researcher(),
+        verifier=Verifier(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+    assert await pipeline.run() == 1
+    assert (dist_dir / "vtuber_dictionary.tsv").read_text(
+        "utf-8"
+    ) == "ほしまちすいせい\t星街すいせい\n"

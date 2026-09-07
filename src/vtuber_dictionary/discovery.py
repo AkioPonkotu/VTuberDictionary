@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from .domain import Agency, Candidate
+from .domain import Agency, Candidate, now
 from .ports import AgencyTalentSource, TwitchStreamSource
 from .repository import CandidateRepository
 
@@ -20,6 +20,7 @@ class AgencyDiscovery:
                 candidate.agency = candidate.agency or agency.name
                 candidate.discovery_sources.add("agency")
                 found.append(candidate)
+            agency.last_checked_at = now()
         return found
 
 

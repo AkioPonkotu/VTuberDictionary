@@ -28,10 +28,14 @@ async def update(settings: Settings) -> int:
     # Agency discovery is optional when the versioned agency registry is initially empty.
     from .agency_source import AgencyPageTalentSource
 
+    agencies = agency_repo.all()
     await persist_discoveries(
         candidate_repo,
-        await AgencyDiscovery(AgencyPageTalentSource()).discover(agency_repo.all_active()),
+        await AgencyDiscovery(AgencyPageTalentSource()).discover(
+            [agency for agency in agencies if agency.active]
+        ),
     )
+    agency_repo.replace(agencies)
     twitch: TwitchHelixClient | None = None
     if settings.twitch_client_id and settings.twitch_client_secret:
         token = await twitch_app_access_token(

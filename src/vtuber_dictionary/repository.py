@@ -94,8 +94,18 @@ class AgencyRepository:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def all_active(self) -> list[Agency]:
+    def all(self) -> list[Agency]:
         if not self.path.exists():
             return []
         raw = json.loads(self.path.read_text("utf-8"))
-        return [Agency.model_validate(item) for item in raw if item.get("active", True)]
+        return [Agency.model_validate(item) for item in raw]
+
+    def all_active(self) -> list[Agency]:
+        return [agency for agency in self.all() if agency.active]
+
+    def replace(self, agencies: Iterable[Agency]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(
+            [agency.model_dump(mode="json") for agency in agencies], ensure_ascii=False
+        )
+        self.path.write_text(payload + "\n", encoding="utf-8")

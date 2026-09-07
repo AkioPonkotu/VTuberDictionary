@@ -43,7 +43,7 @@ class Pipeline:
             ):
                 continue
             metrics = await self.platforms.audience_metrics(candidate)
-            if not threshold.accepts(metrics):
+            if candidate.agency is None and not threshold.accepts(metrics):
                 continue
             research = await self.researcher.research(candidate, metrics)
             verification = await self.verifier.verify(candidate, research, metrics)

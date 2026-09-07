@@ -47,6 +47,8 @@ uv run mypy src
 | `REVERIFY_AFTER_DAYS` | 既存エントリを再検証するまでの日数（既定 180） |
 | `TWITCH_DISCOVERY_ENABLED`, `TWITCH_DISCOVERY_LANGUAGE`, `TWITCH_DISCOVERY_TAG`, `TWITCH_DISCOVERY_MAX_PAGES` | Twitch の収集範囲。language を空にすると言語制限なし |
 
+事務所公式プロフィールから発見した候補は、規模にかかわらず調査・検証の対象です。規模閾値は Twitch 発見など、事務所に紐付かない候補にのみ適用します。
+
 `uv sync` は Microsoft Agent Framework の OpenAI provider もインストールします。Agent は OpenAI の hosted Web Search tool と Pydantic response format を指定して実行します。
 
 `OPENAI_MODEL` は必須です。利用するモデル名を環境変数またはGitHub Repository Variableに指定してください。

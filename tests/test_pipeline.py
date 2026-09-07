@@ -343,10 +343,10 @@ def test_validator_requires_agents_to_agree_on_resolved_reading() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pipeline_compiles_only_verified_mocked_result(tmp_path: Path) -> None:
+async def test_pipeline_compiles_verified_agency_candidate_below_threshold(tmp_path: Path) -> None:
     class Metrics:
         async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
-            return AudienceMetrics(youtube_subscribers=10_000)
+            return AudienceMetrics(youtube_subscribers=0)
 
     evidence = [
         Evidence(url="https://official.example", source_type="official_profile", claim="reading")
@@ -376,7 +376,9 @@ async def test_pipeline_compiles_only_verified_mocked_result(tmp_path: Path) -> 
 
     data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
     candidates = CandidateRepository(data_dir / "candidates.jsonl")
-    candidates.upsert(Candidate(display_name="星街すいせい", youtube_channel_id="UC123"))
+    candidates.upsert(
+        Candidate(display_name="星街すいせい", agency="Agency", youtube_channel_id="UC123")
+    )
     pipeline = Pipeline(
         candidates=candidates,
         entries=EntryRepository(data_dir / "entries.jsonl"),

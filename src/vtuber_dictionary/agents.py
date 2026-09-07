@@ -53,6 +53,18 @@ class AgentFrameworkJsonRunner:
         return str(getattr(response, "text", response))
 
 
+class MissingOpenAICredentials:
+    """Delays a configuration failure until a candidate actually needs research."""
+
+    async def research(self, candidate: Candidate, metrics: AudienceMetrics) -> ResearchResult:
+        raise RuntimeError("OPENAI_API_KEY is required once a candidate passes audience thresholds")
+
+    async def verify(
+        self, candidate: Candidate, research: ResearchResult, metrics: AudienceMetrics
+    ) -> VerificationResult:
+        raise RuntimeError("OPENAI_API_KEY is required once a candidate passes audience thresholds")
+
+
 RESEARCH_INSTRUCTIONS = """You are ReadingResearchAgent. Research exactly one Japanese VTuber.
 Use web search where available. Prefer official agency profiles, the creator's official site,
 YouTube/Twitch descriptions, then official social accounts. Do not infer a Japanese reading from

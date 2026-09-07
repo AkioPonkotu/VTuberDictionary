@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import httpx
 
@@ -15,13 +15,68 @@ LOG = logging.getLogger(__name__)
 
 
 class ApiError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+class AuthenticationError(ApiError):
+    """The credentials lack access or are invalid."""
+
+
+class RateLimitError(ApiError):
+    """The service explicitly asked the client to slow down."""
+
+
+class RemoteServiceError(ApiError):
+    """A remote server returned a retryable 5xx response."""
+
+
+class ClientRequestError(ApiError):
+    """A non-retryable request failed before reaching a useful response."""
 
 
 class RetryingHttpClient:
     def __init__(self, timeout_seconds: float = 20, retries: int = 3) -> None:
         self.client = httpx.AsyncClient(timeout=timeout_seconds)
         self.retries = retries
+
+    @staticmethod
+    def _raise_classified(response: httpx.Response) -> None:
+        if response.status_code < 400:
+            return
+        if response.status_code in {401, 403}:
+            raise AuthenticationError(f"authentication failed for {response.url}")
+        if response.status_code == 429:
+            raise RateLimitError(f"rate limited by {response.url}", retryable=True)
+        if response.status_code >= 500:
+            raise RemoteServiceError(f"service error from {response.url}", retryable=True)
+        raise ClientRequestError(f"request rejected by {response.url}: {response.status_code}")
+
+    async def _request(
+        self,
+        method: Literal["GET", "POST"],
+        url: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        for attempt in range(self.retries):
+            try:
+                response = await self.client.request(method, url, **kwargs)
+                self._raise_classified(response)
+                return response
+            except httpx.TimeoutException as exc:
+                error = ApiError(f"request timed out: {url}", retryable=True)
+                error.__cause__ = exc
+            except ApiError as exc:
+                error = exc
+            if not error.retryable or attempt == self.retries - 1:
+                LOG.warning(
+                    "api_request_failed",
+                    extra={"url": url, "attempt": attempt + 1, "error_type": type(error).__name__},
+                )
+                raise error
+            await asyncio.sleep(2**attempt)
+        raise AssertionError("unreachable")
 
     async def get_json(
         self,
@@ -30,21 +85,8 @@ class RetryingHttpClient:
         params: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        for attempt in range(self.retries):
-            try:
-                response = await self.client.get(url, params=params, headers=headers)
-                if response.status_code in {408, 429} or response.status_code >= 500:
-                    raise httpx.HTTPStatusError(
-                        "retryable response", request=response.request, response=response
-                    )
-                response.raise_for_status()
-                return cast(dict[str, Any], response.json())
-            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-                if attempt == self.retries - 1:
-                    LOG.warning("api_request_failed", extra={"url": url, "attempt": attempt + 1})
-                    raise ApiError(f"request failed: {url}") from exc
-                await asyncio.sleep(2**attempt)
-        raise AssertionError("unreachable")
+        response = await self._request("GET", url, params=params, headers=headers)
+        return cast(dict[str, Any], response.json())
 
     async def post_json(
         self,
@@ -52,36 +94,11 @@ class RetryingHttpClient:
         *,
         data: dict[str, str],
     ) -> dict[str, Any]:
-        for attempt in range(self.retries):
-            try:
-                response = await self.client.post(url, data=data)
-                if response.status_code in {408, 429} or response.status_code >= 500:
-                    raise httpx.HTTPStatusError(
-                        "retryable response", request=response.request, response=response
-                    )
-                response.raise_for_status()
-                return cast(dict[str, Any], response.json())
-            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-                if attempt == self.retries - 1:
-                    raise ApiError(f"request failed: {url}") from exc
-                await asyncio.sleep(2**attempt)
-        raise AssertionError("unreachable")
+        response = await self._request("POST", url, data=data)
+        return cast(dict[str, Any], response.json())
 
     async def get_text(self, url: str) -> str:
-        for attempt in range(self.retries):
-            try:
-                response = await self.client.get(url)
-                if response.status_code in {408, 429} or response.status_code >= 500:
-                    raise httpx.HTTPStatusError(
-                        "retryable response", request=response.request, response=response
-                    )
-                response.raise_for_status()
-                return response.text
-            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-                if attempt == self.retries - 1:
-                    raise ApiError(f"request failed: {url}") from exc
-                await asyncio.sleep(2**attempt)
-        raise AssertionError("unreachable")
+        return (await self._request("GET", url)).text
 
     async def aclose(self) -> None:
         await self.client.aclose()
@@ -138,6 +155,7 @@ class TwitchHelixClient:
         )
         data = user.get("data", [])
         return AudienceMetrics(
+            twitch_display_name=data[0].get("display_name") if data else None,
             twitch_description=data[0].get("description") if data else None,
             twitch_followers=follows.get("total"),
         )
@@ -192,6 +210,7 @@ class YouTubeDataClient:
             if "subscriberCount" in stats
             else None,
             youtube_hidden=hidden,
+            youtube_title=item.get("snippet", {}).get("title"),
             youtube_description=item.get("snippet", {}).get("description"),
         )
 

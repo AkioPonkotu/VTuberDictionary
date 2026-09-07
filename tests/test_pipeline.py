@@ -19,6 +19,7 @@ from vtuber_dictionary.domain import (
     VerificationResult,
 )
 from vtuber_dictionary.filtering import ExistingEntryFilter, ThresholdFilter
+from vtuber_dictionary.platforms import AuthenticationError, RetryingHttpClient, YouTubeDataClient
 from vtuber_dictionary.repository import CandidateRepository
 from vtuber_dictionary.validation import DeterministicValidator
 
@@ -62,6 +63,41 @@ async def test_agency_discovery_marks_candidates_without_verifying() -> None:
 async def test_twitch_discovery_filters_tag_case_insensitively() -> None:
     found = await TwitchDiscovery(FakeStreams(), "VTuber", "ja").discover()
     assert [(item.twitch_user_id, item.twitch_login) for item in found] == [("1", "one")]
+
+
+@pytest.mark.asyncio
+async def test_youtube_client_collects_official_channel_metadata() -> None:
+    class FakeHttp:
+        async def get_json(self, url: str, **kwargs: object) -> dict[str, object]:
+            return {
+                "items": [
+                    {
+                        "id": "channel-id",
+                        "snippet": {"title": "公式名", "description": "official description"},
+                        "statistics": {"subscriberCount": "10000", "hiddenSubscriberCount": False},
+                    }
+                ]
+            }
+
+    candidate = Candidate(display_name="candidate", youtube_channel_id="channel-id")
+    metrics = await YouTubeDataClient("key", http=FakeHttp()).audience_metrics(candidate)  # type: ignore[arg-type]
+    assert (metrics.youtube_title, metrics.youtube_subscribers) == ("公式名", 10_000)
+
+
+@pytest.mark.asyncio
+async def test_http_client_classifies_authentication_failure() -> None:
+    import httpx
+
+    client = RetryingHttpClient(retries=1)
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(401, request=request, json={"message": "invalid"})
+        )
+    )
+    with pytest.raises(AuthenticationError):
+        await client.get_json("https://example.test")
+    await client.aclose()
 
 
 def test_candidate_repository_deduplicates_only_explicit_identity(tmp_path: Path) -> None:
@@ -157,3 +193,24 @@ def test_validator_rejects_unverified_and_invalid_reading() -> None:
     research = ResearchResult(confidence=0, status="unresolved")
     entry, reason = DeterministicValidator().validate(candidate, research, invalid, [])
     assert entry is None and reason == "reading must consist of hiragana and prolonged-sound mark"
+
+
+def test_validator_rejects_conflicting_duplicate_reading() -> None:
+    candidate = Candidate(display_name="X")
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="reading")
+    ]
+    research = ResearchResult(
+        canonical_name="X", reading="えっくす", confidence=1, evidence=evidence, status="resolved"
+    )
+    verification = VerificationResult(
+        verified=True, canonical_name="X", reading="えっくす", confidence=1, evidence=evidence
+    )
+    existing = DictionaryEntry(
+        canonical_id="old",
+        canonical_name="Y",
+        reading="えっくす",
+        source_urls=["https://old.example"],
+    )
+    entry, reason = DeterministicValidator().validate(candidate, research, verification, [existing])
+    assert entry is None and reason == "reading collides with a different canonical name"

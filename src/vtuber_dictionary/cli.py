@@ -6,7 +6,12 @@ import argparse
 import asyncio
 import logging
 
-from .agents import AgentFrameworkJsonRunner, ReadingResearchAgent, VerificationAgent
+from .agents import (
+    AgentFrameworkJsonRunner,
+    MissingOpenAICredentials,
+    ReadingResearchAgent,
+    VerificationAgent,
+)
 from .dictionary import DictionaryCompiler
 from .discovery import AgencyDiscovery, TwitchDiscovery, persist_discoveries
 from .platforms import (
@@ -15,6 +20,7 @@ from .platforms import (
     YouTubeDataClient,
     twitch_app_access_token,
 )
+from .ports import ReadingResearcher, Verifier
 from .repository import AgencyRepository, CandidateRepository, EntryRepository, ReviewRepository
 from .settings import Settings
 from .validation import DeterministicValidator
@@ -56,18 +62,25 @@ async def update(settings: Settings) -> int:
         if settings.youtube_api_key
         else None
     )
-    if not settings.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for research and verification")
-    runner = AgentFrameworkJsonRunner(
-        settings.openai_api_key.get_secret_value(), settings.openai_model
-    )
+    researcher: ReadingResearcher
+    verifier: Verifier
+    if settings.openai_api_key:
+        runner = AgentFrameworkJsonRunner(
+            settings.openai_api_key.get_secret_value(), settings.openai_model
+        )
+        researcher = ReadingResearchAgent(runner)
+        verifier = VerificationAgent(runner)
+    else:
+        missing_credentials = MissingOpenAICredentials()
+        researcher = missing_credentials
+        verifier = missing_credentials
     pipeline = Pipeline(
         candidates=candidate_repo,
         entries=EntryRepository(settings.data_dir / "entries.jsonl"),
         reviews=ReviewRepository(settings.data_dir / "review_required.jsonl"),
         platforms=CombinedPlatformClient(youtube, twitch),
-        researcher=ReadingResearchAgent(runner),
-        verifier=VerificationAgent(runner),
+        researcher=researcher,
+        verifier=verifier,
         validator=DeterministicValidator(),
         compiler=DictionaryCompiler(),
         settings=settings,

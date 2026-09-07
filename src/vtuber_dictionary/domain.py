@@ -64,7 +64,9 @@ class Agency(BaseModel):
 class AudienceMetrics(BaseModel):
     youtube_subscribers: int | None = None
     youtube_hidden: bool = False
+    youtube_title: str | None = None
     twitch_followers: int | None = None
+    twitch_display_name: str | None = None
     youtube_description: str | None = None
     twitch_description: str | None = None
 

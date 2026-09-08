@@ -43,9 +43,17 @@ class MicrosoftImeExporter:
     part_of_speech = "固有名詞"
 
     def export(self, entries: Iterable[DictionaryEntry]) -> bytes:
+        entry_list = _sorted(entries)
+        for entry in entry_list:
+            if any(separator in entry.reading for separator in ("\t", "\r", "\n")):
+                raise ValueError(f"Microsoft IME reading contains a field separator: {entry.reading!r}")
+            if any(separator in entry.canonical_name for separator in ("\t", "\r", "\n")):
+                raise ValueError(
+                    f"Microsoft IME word contains a field separator: {entry.canonical_name!r}"
+                )
         text = "".join(
             f"{entry.reading}\t{entry.canonical_name}\t{self.part_of_speech}\r\n"
-            for entry in _sorted(entries)
+            for entry in entry_list
         )
         return b"\xff\xfe" + text.encode("utf-16-le")
 

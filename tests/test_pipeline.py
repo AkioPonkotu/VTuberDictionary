@@ -685,6 +685,15 @@ def test_platform_exporters_use_the_required_encoding_format_and_csv_escaping() 
     )
 
 
+def test_microsoft_ime_exporter_rejects_tsv_field_separators() -> None:
+    entry = DictionaryEntry(
+        canonical_id="invalid", reading="よみ", canonical_name="語句\t別列", source_urls=[]
+    )
+
+    with pytest.raises(ValueError, match="field separator"):
+        MicrosoftImeExporter().export([entry])
+
+
 @pytest.mark.parametrize(
     ("reading", "canonical_name", "message"),
     [

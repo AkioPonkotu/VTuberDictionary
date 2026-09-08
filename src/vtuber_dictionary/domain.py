@@ -89,9 +89,32 @@ class WebSource(BaseModel):
     content: str
 
 
+class NameReadingParts(BaseModel):
+    """The source-backed surname/given-name breakdown returned by an agent.
+
+    A one-component stage name uses ``null`` for the family-name pair and puts
+    the complete name and reading in the given-name pair.  Keeping the pairs
+    nullable rather than guessing a split is important for mononyms.
+    """
+
+    family_name: str | None = Field(
+        ..., description="Official surname spelling, or null for a one-component stage name."
+    )
+    given_name: str | None = Field(
+        ..., description="Official given-name spelling, or null when no name was resolved."
+    )
+    family_reading: str | None = Field(
+        ..., description="Hiragana reading of family_name, or null with family_name."
+    )
+    given_reading: str | None = Field(
+        ..., description="Hiragana reading of given_name, or null with given_name."
+    )
+
+
 class ResearchResult(BaseModel):
     canonical_name: str | None = None
     reading: str | None = None
+    name_parts: NameReadingParts
     confidence: float = Field(ge=0, le=1)
     evidence: list[Evidence] = Field(default_factory=list)
     status: Literal["resolved", "unresolved"]
@@ -101,6 +124,7 @@ class VerificationResult(BaseModel):
     verified: bool
     canonical_name: str | None = None
     reading: str | None = None
+    name_parts: NameReadingParts
     confidence: float = Field(ge=0, le=1)
     evidence: list[Evidence] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)

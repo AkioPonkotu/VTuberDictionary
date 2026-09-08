@@ -18,6 +18,7 @@ from vtuber_dictionary.domain import (
     CandidateStatus,
     DictionaryEntry,
     Evidence,
+    NameReadingParts,
     ResearchResult,
     ReviewRecord,
     VerificationResult,
@@ -50,6 +51,15 @@ from vtuber_dictionary.web_sources import (
     visible_text,
 )
 from vtuber_dictionary.workflow import Pipeline
+
+
+def name_parts(name: str | None = None, reading: str | None = None) -> NameReadingParts:
+    return NameReadingParts(
+        family_name=None,
+        given_name=name,
+        family_reading=None,
+        given_reading=reading,
+    )
 
 
 class FakeAgencySource:
@@ -430,6 +440,7 @@ def test_validator_rejects_katakana_or_latin_canonical_name() -> None:
     research = ResearchResult(
         canonical_name="Gawr Gura",
         reading="がうるぐら",
+        name_parts=name_parts("Gawr Gura", "がうるぐら"),
         confidence=1,
         evidence=evidence,
         status="resolved",
@@ -438,6 +449,7 @@ def test_validator_rejects_katakana_or_latin_canonical_name() -> None:
         verified=True,
         canonical_name="Gawr Gura",
         reading="がうるぐら",
+        name_parts=name_parts("Gawr Gura", "がうるぐら"),
         confidence=1,
         evidence=evidence,
     )
@@ -541,8 +553,8 @@ def test_settings_keeps_model_unset_when_env_value_is_empty(
 async def test_research_and_verification_parse_structured_output() -> None:
     runner = FakeRunner(
         [
-            '{"canonical_name":"星街すいせい","reading":"ほしまちすいせい","confidence":0.9,"evidence":[{"url":"https://official.example","source_type":"official_profile","claim":"reading"}],"status":"resolved"}',
-            '{"verified":true,"canonical_name":"星街すいせい","reading":"ほしまちすいせい","confidence":0.95,"evidence":[{"url":"https://official.example","source_type":"official_profile","claim":"reading"}],"issues":[]}',
+            '{"canonical_name":"星街すいせい","reading":"ほしまちすいせい","name_parts":{"family_name":"星街","given_name":"すいせい","family_reading":"ほしまち","given_reading":"すいせい"},"confidence":0.9,"evidence":[{"url":"https://official.example","source_type":"official_profile","claim":"reading"}],"status":"resolved"}',
+            '{"verified":true,"canonical_name":"星街すいせい","reading":"ほしまちすいせい","name_parts":{"family_name":"星街","given_name":"すいせい","family_reading":"ほしまち","given_reading":"すいせい"},"confidence":0.95,"evidence":[{"url":"https://official.example","source_type":"official_profile","claim":"reading"}],"issues":[]}',
         ]
     )
     candidate, metrics = Candidate(display_name="星街すいせい"), AudienceMetrics()
@@ -556,6 +568,8 @@ async def test_research_and_verification_parse_structured_output() -> None:
     research = await ReadingResearchAgent(runner).research(candidate, metrics, sources)
     verified = await VerificationAgent(runner).verify(candidate, research, metrics, sources)
     assert research.status == "resolved" and verified.verified
+    assert research.name_parts.family_reading == "ほしまち"
+    assert verified.name_parts.given_reading == "すいせい"
     assert runner.response_models == [ResearchResult, VerificationResult]
     assert "prefetched_sources" in runner.prompts[0]
     assert "https://official.example" in runner.prompts[0]
@@ -640,6 +654,7 @@ def test_validator_requires_verification_for_fetched_agency_profile() -> None:
     research = ResearchResult(
         canonical_name="星街すいせい",
         reading="ほしまちすいせい",
+        name_parts=name_parts("星街すいせい", "ほしまちすいせい"),
         confidence=1,
         evidence=[
             Evidence(
@@ -658,6 +673,7 @@ def test_validator_requires_verification_for_fetched_agency_profile() -> None:
         verified=True,
         canonical_name="星街すいせい",
         reading="ほしまちすいせい",
+        name_parts=name_parts("星街すいせい", "ほしまちすいせい"),
         confidence=1,
         evidence=[
             Evidence(
@@ -679,6 +695,7 @@ def test_deterministic_validator_and_compiler(tmp_path: Path) -> None:
     research = ResearchResult(
         canonical_name="星街すいせい",
         reading="ほしまちすいせい",
+        name_parts=name_parts("星街すいせい", "ほしまちすいせい"),
         confidence=0.9,
         evidence=evidence,
         status="resolved",
@@ -687,6 +704,7 @@ def test_deterministic_validator_and_compiler(tmp_path: Path) -> None:
         verified=True,
         canonical_name="星街すいせい",
         reading="ほしまちすいせい",
+        name_parts=name_parts("星街すいせい", "ほしまちすいせい"),
         confidence=0.9,
         evidence=evidence,
     )
@@ -744,9 +762,14 @@ def test_macos_exporter_enforces_professional_dictionary_limits(
 def test_validator_rejects_unverified_and_invalid_reading() -> None:
     candidate = Candidate(display_name="X")
     invalid = VerificationResult(
-        verified=True, canonical_name="X", reading="invalid", confidence=1, evidence=[]
+        verified=True,
+        canonical_name="X",
+        reading="invalid",
+        name_parts=name_parts("X", "invalid"),
+        confidence=1,
+        evidence=[],
     )
-    research = ResearchResult(confidence=0, status="unresolved")
+    research = ResearchResult(name_parts=name_parts(), confidence=0, status="unresolved")
     entry, reason = DeterministicValidator().validate(candidate, research, invalid, [])
     assert entry is None and reason == "reading must consist of hiragana and prolonged-sound mark"
 
@@ -757,10 +780,20 @@ def test_validator_rejects_conflicting_duplicate_reading() -> None:
         Evidence(url="https://official.example", source_type="official_profile", claim="reading")
     ]
     research = ResearchResult(
-        canonical_name="X", reading="えっくす", confidence=1, evidence=evidence, status="resolved"
+        canonical_name="X",
+        reading="えっくす",
+        name_parts=name_parts("X", "えっくす"),
+        confidence=1,
+        evidence=evidence,
+        status="resolved",
     )
     verification = VerificationResult(
-        verified=True, canonical_name="X", reading="えっくす", confidence=1, evidence=evidence
+        verified=True,
+        canonical_name="X",
+        reading="えっくす",
+        name_parts=name_parts("X", "えっくす"),
+        confidence=1,
+        evidence=evidence,
     )
     existing = DictionaryEntry(
         canonical_id="old",
@@ -778,13 +811,58 @@ def test_validator_requires_agents_to_agree_on_resolved_reading() -> None:
         Evidence(url="https://official.example", source_type="official_profile", claim="reading")
     ]
     research = ResearchResult(
-        canonical_name="X", reading="えっくす", confidence=1, evidence=evidence, status="resolved"
+        canonical_name="X",
+        reading="えっくす",
+        name_parts=name_parts("X", "えっくす"),
+        confidence=1,
+        evidence=evidence,
+        status="resolved",
     )
     verification = VerificationResult(
-        verified=True, canonical_name="X", reading="えくす", confidence=1, evidence=evidence
+        verified=True,
+        canonical_name="X",
+        reading="えくす",
+        name_parts=name_parts("X", "えくす"),
+        confidence=1,
+        evidence=evidence,
     )
     entry, reason = DeterministicValidator().validate(candidate, research, verification, [])
     assert entry is None and reason == "research and verification results disagree"
+
+
+def test_validator_rejects_a_missing_family_reading() -> None:
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="name")
+    ]
+    parts = NameReadingParts(
+        family_name="本阿弥",
+        given_name="あずさ",
+        family_reading=None,
+        given_reading="あずさ",
+    )
+    research = ResearchResult(
+        canonical_name="本阿弥あずさ",
+        reading="あずさ",
+        name_parts=parts,
+        confidence=1,
+        evidence=evidence,
+        status="resolved",
+    )
+    verification = VerificationResult(
+        verified=True,
+        canonical_name="本阿弥あずさ",
+        reading="あずさ",
+        name_parts=parts,
+        confidence=1,
+        evidence=evidence,
+    )
+
+    entry, reason = DeterministicValidator().validate(
+        Candidate(display_name="本阿弥あずさ"), research, verification, []
+    )
+
+    assert entry is None
+    assert reason == "family name and reading must both be present or absent"
 
 
 @pytest.mark.asyncio
@@ -804,6 +882,7 @@ async def test_pipeline_compiles_verified_agency_candidate_below_threshold(tmp_p
             return ResearchResult(
                 canonical_name="星街すいせい",
                 reading="ほしまちすいせい",
+                name_parts=name_parts("星街すいせい", "ほしまちすいせい"),
                 confidence=1,
                 evidence=evidence,
                 status="resolved",
@@ -821,6 +900,7 @@ async def test_pipeline_compiles_verified_agency_candidate_below_threshold(tmp_p
                 verified=True,
                 canonical_name=research.canonical_name,
                 reading=research.reading,
+                name_parts=research.name_parts,
                 confidence=1,
                 evidence=evidence,
             )
@@ -877,6 +957,7 @@ async def test_pipeline_verifies_prefetched_agency_profile(tmp_path: Path) -> No
             return ResearchResult(
                 canonical_name="星街すいせい",
                 reading="ほしまちすいせい",
+                name_parts=name_parts("星街すいせい", "ほしまちすいせい"),
                 confidence=1,
                 evidence=[
                     Evidence(
@@ -904,6 +985,7 @@ async def test_pipeline_verifies_prefetched_agency_profile(tmp_path: Path) -> No
                 verified=True,
                 canonical_name=research.canonical_name,
                 reading=research.reading,
+                name_parts=research.name_parts,
                 confidence=1,
                 evidence=research.evidence,
             )
@@ -1205,6 +1287,7 @@ async def test_pipeline_resumes_a_checkpointed_entry_without_researching(
             return ResearchResult(
                 canonical_name="再開タレント",
                 reading="さいかいたれんと",
+                name_parts=name_parts("再開タレント", "さいかいたれんと"),
                 confidence=1,
                 evidence=evidence,
                 status="resolved",
@@ -1222,6 +1305,7 @@ async def test_pipeline_resumes_a_checkpointed_entry_without_researching(
                 verified=True,
                 canonical_name=research.canonical_name,
                 reading=research.reading,
+                name_parts=research.name_parts,
                 confidence=1,
                 evidence=evidence,
             )

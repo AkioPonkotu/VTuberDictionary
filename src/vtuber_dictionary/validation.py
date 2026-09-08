@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from .domain import Candidate, DictionaryEntry, ResearchResult, VerificationResult
+from .domain import Candidate, DictionaryEntry, NameReadingParts, ResearchResult, VerificationResult
 from .filtering import KatakanaOrLatinNameFilter
 
 READING_PATTERN = re.compile(r"^[ぁ-ゖゝゞー]+$")
@@ -35,10 +35,19 @@ class DeterministicValidator:
         reading = unicodedata.normalize("NFC", verification.reading or "")
         if not name or not reading:
             return None, "canonical name or reading is missing"
+        if reason := self._name_parts_reason(verification.name_parts, name, reading):
+            return None, reason
         research_name = unicodedata.normalize("NFC", research.canonical_name or "")
         research_reading = unicodedata.normalize("NFC", research.reading or "")
         if research.status == "resolved" and (research_name != name or research_reading != reading):
             return None, "research and verification results disagree"
+        if research.status == "resolved":
+            if reason := self._name_parts_reason(
+                research.name_parts, research_name, research_reading
+            ):
+                return None, reason
+            if research.name_parts != verification.name_parts:
+                return None, "research and verification name parts disagree"
         if not READING_PATTERN.fullmatch(reading):
             return None, "reading must consist of hiragana and prolonged-sound mark"
         if not verification.evidence:
@@ -66,3 +75,19 @@ class DeterministicValidator:
             twitch_user_id=candidate.twitch_user_id,
             source_urls=urls,
         ), None
+
+    @staticmethod
+    def _name_parts_reason(parts: NameReadingParts, name: str, reading: str) -> str | None:
+        if (parts.family_name is None) != (parts.family_reading is None):
+            return "family name and reading must both be present or absent"
+        if (parts.given_name is None) != (parts.given_reading is None):
+            return "given name and reading must both be present or absent"
+        joined_name = "".join(part for part in (parts.family_name, parts.given_name) if part)
+        joined_reading = "".join(
+            part for part in (parts.family_reading, parts.given_reading) if part
+        )
+        if joined_name != name:
+            return "name parts do not compose canonical name"
+        if joined_reading != reading:
+            return "reading parts do not compose reading"
+        return None

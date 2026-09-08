@@ -5,18 +5,70 @@ on:
     # Monday 10:13 JST (01:13 UTC). Avoid the start-of-hour schedule peak.
     - cron: "13 1 * * 1"
   workflow_dispatch:
+    inputs:
+      runner_smoke_test:
+        description: Verify the selected runner without updating dictionary data.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 # The Twitch and agency workflows both update the same versioned state.
 concurrency:
-  group: dictionary-update
+  group: ${{ inputs.runner_smoke_test && 'agency-runner-smoke-test' || 'dictionary-update' }}
   queue: max
 
 jobs:
-  update:
+  select-runner:
+    # Runner status is checked on a GitHub-hosted VM before the update job is
+    # queued. A failed status check deliberately falls back to GitHub-hosted.
     runs-on: ubuntu-latest
+    outputs:
+      runner_json: ${{ steps.select.outputs.runner_json }}
+      runner_kind: ${{ steps.select.outputs.runner_kind }}
+    steps:
+      - id: select
+        name: Prefer the idle local runner when it is available
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        shell: bash
+        run: |
+          if runners="$(gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/runners?name=vtuberdictionary-wsl" \
+            2>/dev/null)" \
+            && jq -e '
+              .runners[]
+              | select(
+                  .status == "online"
+                  and .busy == false
+                  and any(.labels[]; .name == "vtuber-local")
+                )
+            ' >/dev/null <<<"$runners"; then
+            echo 'runner_json=["self-hosted","Linux","X64","vtuber-local"]' >> "$GITHUB_OUTPUT"
+            echo 'runner_kind=local' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner_json=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'runner_kind=github-hosted' >> "$GITHUB_OUTPUT"
+          fi
+
+  verify-runner:
+    if: ${{ inputs.runner_smoke_test }}
+    needs: select-runner
+    runs-on: ${{ fromJSON(needs.select-runner.outputs.runner_json) }}
+    steps:
+      - name: Verify the local agency runner assignment
+        shell: bash
+        run: |
+          test "$RUNNER_ENVIRONMENT" = "self-hosted"
+          test "$RUNNER_OS" = "Linux"
+          test "$RUNNER_NAME" = "vtuberdictionary-wsl"
+
+  update:
+    if: ${{ !inputs.runner_smoke_test }}
+    needs: select-runner
+    runs-on: ${{ fromJSON(needs.select-runner.outputs.runner_json) }}
     environment: dictionary-update
     steps:
       - uses: actions/checkout@v4

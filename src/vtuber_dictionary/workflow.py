@@ -26,6 +26,7 @@ class Pipeline:
     validator: DeterministicValidator
     compiler: DictionaryCompiler
     settings: Settings
+    candidate_source_filter: set[str] | None = None
     web_sources: WebSourcePrefetcher | None = None
 
     async def run(self) -> int:
@@ -34,7 +35,13 @@ class Pipeline:
         self.entries.recover_publication(artifact_paths)
         self.reviews.recover_checkpoint(self.candidates)
         existing = self.entries.all()
-        candidates = self.candidates.all()
+        all_candidates = self.candidates.all()
+        candidates = [
+            candidate
+            for candidate in all_candidates
+            if self.candidate_source_filter is None
+            or candidate.discovery_sources & self.candidate_source_filter
+        ]
         name_filter = KatakanaOrLatinNameFilter()
         excluded_ids = {
             candidate.canonical_id
@@ -56,7 +63,7 @@ class Pipeline:
                 if candidate.canonical_id in excluded_ids:
                     candidate.status = CandidateStatus.REJECTED
                     candidate.pending_entry = None
-            self.candidates.replace(candidates)
+            self.candidates.replace(all_candidates)
         retained_entries = [
             entry
             for entry in existing
@@ -84,7 +91,7 @@ class Pipeline:
                 existing_filter = ExistingEntryFilter(existing)
                 candidate.pending_entry = None
                 candidate.status = CandidateStatus.VERIFIED
-                self.candidates.replace(candidates)
+                self.candidates.replace(all_candidates)
                 additions += int(was_new)
                 continue
             if candidate.status in {
@@ -102,27 +109,27 @@ class Pipeline:
                 attempt = AgentAttempt(number=candidate.research_attempts + 1)
                 candidate.research_attempts += 1
                 candidate.agent_attempts.append(attempt)
-                self.candidates.replace(candidates)
+                self.candidates.replace(all_candidates)
 
                 research = await self.researcher.research(candidate, metrics, sources)
                 candidate.research_raw_json = research.raw_json
                 attempt.research_raw_json = research.raw_json
-                self.candidates.replace(candidates)
+                self.candidates.replace(all_candidates)
                 if research.canonical_name and name_filter.excludes_name(research.canonical_name):
                     candidate.status = CandidateStatus.REJECTED
-                    self.candidates.replace(candidates)
+                    self.candidates.replace(all_candidates)
                     break
 
                 verification = await self.verifier.verify(candidate, research, metrics, sources)
                 candidate.verification_raw_json = verification.raw_json
                 attempt.verification_raw_json = verification.raw_json
-                self.candidates.replace(candidates)
+                self.candidates.replace(all_candidates)
                 if (
                     verification.canonical_name
                     and name_filter.excludes_name(verification.canonical_name)
                 ):
                     candidate.status = CandidateStatus.REJECTED
-                    self.candidates.replace(candidates)
+                    self.candidates.replace(all_candidates)
                     break
 
                 prior = [
@@ -134,7 +141,7 @@ class Pipeline:
 
                 candidate.retry_reason = self._retry_reason(reason, verification)
                 attempt.failure_reason = candidate.retry_reason
-                self.candidates.replace(candidates)
+                self.candidates.replace(all_candidates)
 
             if candidate.status == CandidateStatus.REJECTED:
                 continue
@@ -142,7 +149,7 @@ class Pipeline:
                 candidate.status = CandidateStatus.REVIEW_REQUIRED
                 self.reviews.checkpoint_review(
                     self.candidates,
-                    candidates,
+                    all_candidates,
                     ReviewRecord(
                         canonical_id=candidate.canonical_id,
                         reason=candidate.retry_reason or reason or "unknown",
@@ -153,13 +160,13 @@ class Pipeline:
             # Persist the agent result before attempting the multi-file
             # publication.  The next run can resume from this exact entry.
             candidate.pending_entry = entry
-            self.candidates.replace(candidates)
+            self.candidates.replace(all_candidates)
             self._publish_entry(existing, entry)
             existing = self.entries.all()
             existing_filter = ExistingEntryFilter(existing)
             candidate.pending_entry = None
             candidate.status = CandidateStatus.VERIFIED
-            self.candidates.replace(candidates)
+            self.candidates.replace(all_candidates)
             additions += 1
         if not all(path.exists() for path in artifact_paths):
             self._publish_entries(existing)

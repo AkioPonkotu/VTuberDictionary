@@ -33,6 +33,11 @@ from .validation import DeterministicValidator
 from .web_sources import TwitchSearchSourcePrefetcher
 from .workflow import Pipeline
 
+PROCESSING_SOURCE_MARKERS = {
+    "agency": "agency",
+    "twitch": "twitch_vtuber_tag",
+}
+
 
 async def discover(settings: Settings, discovery_sources: set[str] | None = None) -> None:
     """Persist candidates discovered from the selected sources."""
@@ -68,8 +73,8 @@ async def discover(settings: Settings, discovery_sources: set[str] | None = None
             )
 
 
-async def process(settings: Settings) -> int:
-    """Research and publish already-persisted candidates."""
+async def process(settings: Settings, processing_sources: set[str] | None = None) -> int:
+    """Research and publish persisted candidates from the selected sources."""
     candidate_repo = CandidateRepository(settings.data_dir / "candidates.jsonl")
     twitch: TwitchHelixClient | None = None
     if settings.twitch_client_id and settings.twitch_client_secret:
@@ -108,6 +113,11 @@ async def process(settings: Settings) -> int:
         validator=DeterministicValidator(),
         compiler=DictionaryCompiler(),
         settings=settings,
+        candidate_source_filter=(
+            {PROCESSING_SOURCE_MARKERS[source] for source in processing_sources}
+            if processing_sources
+            else None
+        ),
         web_sources=TwitchSearchSourcePrefetcher(
             enabled=settings.twitch_crawler_enabled,
             max_results=settings.twitch_crawler_max_results,
@@ -120,7 +130,7 @@ async def process(settings: Settings) -> int:
 async def update(settings: Settings, discovery_sources: set[str] | None = None) -> int:
     """Discover candidates first, then run the safe, threshold-gated pipeline."""
     await discover(settings, discovery_sources)
-    return await process(settings)
+    return await process(settings, discovery_sources)
 
 
 def main() -> None:
@@ -135,7 +145,7 @@ def main() -> None:
         action="append",
         choices=("agency", "twitch"),
         dest="sources",
-        help="For update/discover: select discovery sources; specify more than once to combine.",
+        help="For update/discover/process: select sources; specify more than once to combine.",
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -148,7 +158,7 @@ def main() -> None:
         logging.getLogger(__name__).info("dictionary_discovery_complete")
         return
     if args.command == "process":
-        count = asyncio.run(process(Settings()))
+        count = asyncio.run(process(Settings(), sources))
     else:
         count = asyncio.run(update(Settings(), sources))
     logging.getLogger(__name__).info("dictionary_update_complete", extra={"new_entries": count})

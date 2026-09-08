@@ -546,6 +546,86 @@ async def test_pipeline_does_not_contact_services_for_an_existing_entry(tmp_path
     assert await pipeline.run() == 0
 
 
+@pytest.mark.asyncio
+async def test_pipeline_processes_only_candidates_matching_source_filter(tmp_path: Path) -> None:
+    evidence = [
+        Evidence(url="https://twitch.tv/streamer", source_type="twitch_about", claim="name")
+    ]
+    processed: list[str] = []
+
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            assert candidate.display_name == "星街すいせい"
+            return AudienceMetrics(twitch_followers=5_000)
+
+    class Researcher:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            processed.append(candidate.display_name)
+            return ResearchResult(
+                canonical_name="星街すいせい",
+                reading="ほしまちすいせい",
+                name_parts=NameReadingParts(
+                    family_name="星街",
+                    given_name="すいせい",
+                    family_reading="ほしまち",
+                    given_reading="すいせい",
+                ),
+                confidence=1,
+                evidence=evidence,
+                status="resolved",
+            )
+
+    class Verifier:
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            return VerificationResult(
+                verified=True,
+                canonical_name=research.canonical_name,
+                reading=research.reading,
+                name_parts=research.name_parts,
+                confidence=1,
+                evidence=evidence,
+            )
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    agency = candidates.upsert(
+        Candidate(display_name="白星あわわ", agency="Agency", discovery_sources={"agency"})
+    )
+    twitch = candidates.upsert(
+        Candidate(
+            display_name="星街すいせい",
+            twitch_user_id="1",
+            discovery_sources={"twitch_vtuber_tag"},
+        )
+    )
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=Researcher(),
+        verifier=Verifier(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+        candidate_source_filter={"twitch_vtuber_tag"},
+    )
+
+    assert await pipeline.run() == 1
+    assert processed == ["星街すいせい"]
+    stored = {candidate.canonical_id: candidate for candidate in candidates.all()}
+    assert stored[agency.canonical_id].status == CandidateStatus.DISCOVERED
+    assert stored[twitch.canonical_id].status == CandidateStatus.VERIFIED
+
+
 def test_settings_keeps_model_unset_when_env_value_is_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

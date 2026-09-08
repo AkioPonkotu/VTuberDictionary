@@ -2,6 +2,13 @@
 
 日本の VTuber 名を、ひらがなの読みから正式名称へ変換する IME 辞書作成用 Python パイプラインです。
 
+## 辞書を使う（開発不要）
+
+[Releases](https://github.com/AkioPonkotu/VTuberDictionary/releases/latest) の **Assets** から、使う OS 用のファイルをダウンロードします。
+
+- **Windows:** `vtuber_dictionary_msime.txt` をダウンロードし、Microsoft IME の「ユーザー辞書ツール」で **ツール → テキスト ファイルからの登録** を選んで読み込みます。
+- **macOS:** `vtuber_dictionary_macos.csv` をダウンロードし、「日本語入力」のユーザ辞書で **辞書を開く → ファイル → 開く** を選んで読み込みます。
+
 ## アーキテクチャ
 
 ```mermaid

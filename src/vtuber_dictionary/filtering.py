@@ -12,10 +12,11 @@ class KatakanaOrLatinNameFilter:
     """Reject names whose meaningful characters are only Katakana or Latin."""
 
     def excludes(self, candidate: Candidate) -> bool:
+        return self.excludes_name(candidate.display_name)
+
+    def excludes_name(self, display_name: str) -> bool:
         characters = [
-            character
-            for character in normalize("NFKC", candidate.display_name)
-            if character.isalpha()
+            character for character in normalize("NFKC", display_name) if character.isalpha()
         ]
         return bool(characters) and all(
             self._is_katakana_or_latin(character) for character in characters

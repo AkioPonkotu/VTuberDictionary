@@ -410,6 +410,33 @@ def test_katakana_or_latin_name_filter_keeps_names_with_japanese_characters(
     assert not KatakanaOrLatinNameFilter().excludes(Candidate(display_name=display_name))
 
 
+def test_validator_rejects_katakana_or_latin_canonical_name() -> None:
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="name")
+    ]
+    research = ResearchResult(
+        canonical_name="Gawr Gura",
+        reading="がうるぐら",
+        confidence=1,
+        evidence=evidence,
+        status="resolved",
+    )
+    verification = VerificationResult(
+        verified=True,
+        canonical_name="Gawr Gura",
+        reading="がうるぐら",
+        confidence=1,
+        evidence=evidence,
+    )
+
+    entry, reason = DeterministicValidator().validate(
+        Candidate(display_name="がうる・ぐら"), research, verification, []
+    )
+
+    assert entry is None
+    assert reason == "canonical name must include hiragana or kanji"
+
+
 def test_existing_entry_filter_uses_canonical_id_and_reverify_window() -> None:
     candidate = Candidate(display_name="表示名")
     entry = DictionaryEntry(
@@ -899,6 +926,60 @@ async def test_pipeline_removes_previously_published_katakana_or_latin_candidate
     assert await pipeline.run() == 0
     assert entries.all() == []
     assert (dist_dir / "vtuber_dictionary.tsv").read_bytes() == b""
+
+
+@pytest.mark.asyncio
+async def test_pipeline_removes_existing_latin_entry_when_candidate_has_japanese_alias(
+    tmp_path: Path,
+) -> None:
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidate = candidates.upsert(Candidate(display_name="さくらみこ Sakura Miko"))
+    entries = EntryRepository(data_dir / "entries.jsonl")
+    entries.replace(
+        [
+            DictionaryEntry(
+                canonical_id=candidate.canonical_id,
+                reading="さくらみこ",
+                canonical_name="Sakura Miko",
+                source_urls=[],
+            )
+        ]
+    )
+
+    class MustNotRun:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            raise AssertionError("canonical-name filter should prevent platform calls")
+
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            raise AssertionError("canonical-name filter should prevent research")
+
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            raise AssertionError("canonical-name filter should prevent verification")
+
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=entries,
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=MustNotRun(),
+        researcher=MustNotRun(),
+        verifier=MustNotRun(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+
+    assert await pipeline.run() == 0
+    assert candidates.all()[0].status == CandidateStatus.REJECTED
+    assert entries.all() == []
 
 
 def test_entry_publication_recovers_after_the_first_file_is_replaced(

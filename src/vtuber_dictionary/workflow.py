@@ -34,26 +34,36 @@ class Pipeline:
         self.reviews.recover_checkpoint(self.candidates)
         existing = self.entries.all()
         candidates = self.candidates.all()
-        excluded_candidates = KatakanaOrLatinNameFilter()
+        name_filter = KatakanaOrLatinNameFilter()
         excluded_ids = {
             candidate.canonical_id
             for candidate in candidates
-            if excluded_candidates.excludes(candidate)
+            if name_filter.excludes(candidate)
+            or (
+                candidate.pending_entry is not None
+                and name_filter.excludes_name(candidate.pending_entry.canonical_name)
+            )
         }
+        excluded_entry_ids = {
+            entry.canonical_id
+            for entry in existing
+            if name_filter.excludes_name(entry.canonical_name)
+        }
+        excluded_ids |= excluded_entry_ids
         if excluded_ids:
             for candidate in candidates:
                 if candidate.canonical_id in excluded_ids:
                     candidate.status = CandidateStatus.REJECTED
                     candidate.pending_entry = None
             self.candidates.replace(candidates)
-            retained_entries = [
-                entry for entry in existing if entry.canonical_id not in excluded_ids
-            ]
-            if len(retained_entries) != len(existing):
-                self.entries.publish(
-                    retained_entries, artifact, self.compiler.render(retained_entries)
-                )
-                existing = retained_entries
+        retained_entries = [
+            entry
+            for entry in existing
+            if entry.canonical_id not in excluded_ids | excluded_entry_ids
+        ]
+        if len(retained_entries) != len(existing):
+            self.entries.publish(retained_entries, artifact, self.compiler.render(retained_entries))
+            existing = retained_entries
         existing_filter = ExistingEntryFilter(existing, self.settings.reverify_after_days)
         threshold = ThresholdFilter(
             self.settings.youtube_min_subscribers,
@@ -86,11 +96,23 @@ class Pipeline:
                 continue
             sources = await self.web_sources.fetch(candidate, metrics) if self.web_sources else []
             research = await self.researcher.research(candidate, metrics, sources)
+            if research.canonical_name and name_filter.excludes_name(research.canonical_name):
+                candidate.status = CandidateStatus.REJECTED
+                self.candidates.replace(candidates)
+                continue
             verification = (
                 None
                 if self.validator.can_skip_verification(candidate, research, sources)
                 else await self.verifier.verify(candidate, research, metrics, sources)
             )
+            if (
+                verification
+                and verification.canonical_name
+                and name_filter.excludes_name(verification.canonical_name)
+            ):
+                candidate.status = CandidateStatus.REJECTED
+                self.candidates.replace(candidates)
+                continue
             prior = [entry for entry in existing if entry.canonical_id != candidate.canonical_id]
             entry, reason = self.validator.validate(
                 candidate, research, verification, prior, sources

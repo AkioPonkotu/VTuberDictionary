@@ -6,6 +6,7 @@ import re
 import unicodedata
 
 from .domain import Candidate, DictionaryEntry, ResearchResult, VerificationResult, WebSource
+from .filtering import KatakanaOrLatinNameFilter
 
 READING_PATTERN = re.compile(r"^[ぁ-ゖゝゞー]+$")
 PRIMARY_SOURCE_TYPES = {
@@ -85,6 +86,8 @@ class DeterministicValidator:
             return None, "reading collides with a different canonical name"
         if any(item.canonical_name == name and item.reading != reading for item in existing):
             return None, "canonical name has a conflicting reading"
+        if KatakanaOrLatinNameFilter().excludes_name(name):
+            return None, "canonical name must include hiragana or kanji"
         urls = list(dict.fromkeys([e.url for e in evidence]))
         return DictionaryEntry(
             canonical_id=candidate.canonical_id,

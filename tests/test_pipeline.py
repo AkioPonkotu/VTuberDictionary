@@ -32,6 +32,7 @@ from vtuber_dictionary.filtering import (
 from vtuber_dictionary.platforms import (
     AuthenticationError,
     CombinedPlatformClient,
+    RateLimitError,
     RetryingHttpClient,
     TwitchHelixClient,
     YouTubeDataClient,
@@ -160,6 +161,37 @@ async def test_agency_page_source_extracts_official_profile_platform_links() -> 
     )
     [candidate] = await source.list_talents(agency)
     assert (candidate.youtube_channel_id, candidate.twitch_login) == ("UC123", "example")
+
+
+@pytest.mark.asyncio
+async def test_agency_page_source_keeps_named_profile_when_enrichment_is_rate_limited() -> None:
+    class FakeHttp:
+        async def get_text(self, url: str) -> str:
+            pages = {
+                "https://agency.example/talents": (
+                    '<a href="/talents/available">利用可能 タレント</a>'
+                    '<a href="/talents/limited">制限中 タレント</a>'
+                ),
+                "https://agency.example/talents/available": "<title>利用可能 タレント</title>",
+            }
+            if url == "https://agency.example/talents/limited":
+                raise RateLimitError("rate limited", retryable=True)
+            return pages[url]
+
+    source = AgencyPageTalentSource(http=FakeHttp())  # type: ignore[arg-type]
+    agency = Agency(
+        name="Agency",
+        official_url="https://agency.example",
+        talent_list_url="https://agency.example/talents",
+        profile_url_pattern=r"^/talents/[^/]+$",
+    )
+
+    candidates = await source.list_talents(agency)
+
+    assert [(item.display_name, item.official_profile_url) for item in candidates] == [
+        ("利用可能 タレント", "https://agency.example/talents/available"),
+        ("制限中 タレント", "https://agency.example/talents/limited"),
+    ]
 
 
 def test_agency_page_source_rejects_profile_links_with_control_characters() -> None:

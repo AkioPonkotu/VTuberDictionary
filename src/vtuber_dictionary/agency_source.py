@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -12,6 +13,8 @@ from urllib.parse import urljoin, urlparse
 
 from .domain import Agency, Candidate
 from .platforms import ApiError, RetryingHttpClient, valid_twitch_login
+
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -159,7 +162,22 @@ class AgencyPageTalentSource:
                 agency=agency.name,
                 official_profile_url=profile,
             )
-            title = await self._add_official_platform_links(candidate)
+            try:
+                title = await self._add_official_platform_links(candidate)
+            except ApiError as error:
+                # A roster card with a visible name and official profile URL is
+                # still trustworthy identity evidence.  Do not let a temporary
+                # failure on one profile block the remainder of the agency.
+                LOG.warning(
+                    "official_profile_unavailable agency=%s profile=%s error=%s",
+                    agency.name,
+                    profile,
+                    type(error).__name__,
+                )
+                if not name:
+                    continue
+                candidates.append(candidate)
+                continue
             if not name:
                 if title is None:
                     continue

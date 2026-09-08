@@ -44,7 +44,6 @@ uv run mypy src
 | `YOUTUBE_MIN_SUBSCRIBERS` | 既定 10000 |
 | `TWITCH_MIN_FOLLOWERS` | 既定 5000 |
 | `AUDIENCE_THRESHOLD_MODE` | 既定 `any`（YouTube **または** Twitch）。`all` も利用可能 |
-| `REVERIFY_AFTER_DAYS` | 既存エントリを再検証するまでの日数（既定 180） |
 | `TWITCH_DISCOVERY_ENABLED`, `TWITCH_DISCOVERY_LANGUAGE`, `TWITCH_DISCOVERY_TAG`, `TWITCH_DISCOVERY_MAX_PAGES` | Twitch の収集範囲。language を空にすると言語制限なし |
 | `TWITCH_CRAWLER_ENABLED`, `TWITCH_CRAWLER_MAX_RESULTS`, `TWITCH_CRAWLER_DELAY_SECONDS` | Twitch 発見候補だけに使う、API キー不要の Web クローラ（既定は上位 3 件・リクエスト間隔 1 秒） |
 
@@ -124,7 +123,7 @@ ReadingResearchAgent は事前取得した公式事務所プロフィール、�
 それ以外は VerificationAgent が同じ事前取得ソースを監査します。公式根拠のない漢字・ローマ字からの
 推測は `unresolved` となり、採用されません。
 
-同一人物の統合は YouTube channel ID、Twitch user ID、または公式プロフィール URL の一致だけで行います。表示名が一致するだけでは統合せず、曖昧なものは `review_required` です。候補の元の表示名を Unicode 正規化した上で、実質文字がカタカナとラテン文字だけの場合は `rejected` とし、プラットフォーム API や OpenAI Agent を呼ぶ前に除外します。漢字またはひらがなを含む候補は除外しません。既存エントリと Agent の正式表記にも同じ判定を適用して、別名の併記による漏れを防ぎます。既存エントリは canonical ID と再検証期限で判定し、無駄な公式ページ取得 / OpenAI 呼び出しを避けます。
+同一人物の統合は YouTube channel ID、Twitch user ID、または公式プロフィール URL の一致だけで行います。表示名が一致するだけでは統合せず、曖昧なものは `review_required` です。候補の元の表示名を Unicode 正規化した上で、実質文字がカタカナとラテン文字だけの場合は `rejected` とし、プラットフォーム API や OpenAI Agent を呼ぶ前に除外します。漢字またはひらがなを含む候補は除外しません。既存エントリと Agent の正式表記にも同じ判定を適用して、別名の併記による漏れを防ぎます。既に辞書化された候補は canonical ID、YouTube channel ID、または Twitch user ID の一致で判定し、プラットフォーム API・公式ページ取得・OpenAI Agent による調査および検証の対象から除外します。
 
 Twitch Discovery は Helix の **Get Streams** をページングして `VTuber` タグ（大文字小文字を区別しない）を持つライブ配信者だけを発見します。ライブ中でない VTuber を一度に検索する仕組みではありません。そのため `candidates.jsonl` を実行をまたいで保持し、候補集合を少しずつ増やします。
 

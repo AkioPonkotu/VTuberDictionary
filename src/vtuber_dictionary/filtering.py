@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from unicodedata import name, normalize
 
 from .domain import AudienceMetrics, Candidate, DictionaryEntry
@@ -52,7 +51,9 @@ class ThresholdFilter:
 
 
 class ExistingEntryFilter:
-    def __init__(self, entries: list[DictionaryEntry], reverify_after_days: int) -> None:
+    """Exclude candidates that already have a published dictionary entry."""
+
+    def __init__(self, entries: list[DictionaryEntry]) -> None:
         self.entries = {entry.canonical_id: entry for entry in entries}
         self.entries_by_platform_identity = {
             key: entry
@@ -63,9 +64,7 @@ class ExistingEntryFilter:
             )
             if key is not None
         }
-        self.reverify_after = timedelta(days=reverify_after_days)
-
-    def needs_research(self, candidate: Candidate, today: datetime | None = None) -> bool:
+    def needs_research(self, candidate: Candidate) -> bool:
         existing = self.entries.get(candidate.canonical_id) or next(
             (
                 self.entries_by_platform_identity[key]
@@ -74,7 +73,4 @@ class ExistingEntryFilter:
             ),
             None,
         )
-        if existing is None:
-            return True
-        today = today or datetime.now(UTC)
-        return today - existing.verified_at > self.reverify_after
+        return existing is None

@@ -437,18 +437,17 @@ def test_validator_rejects_katakana_or_latin_canonical_name() -> None:
     assert reason == "canonical name must include hiragana or kanji"
 
 
-def test_existing_entry_filter_uses_canonical_id_and_reverify_window() -> None:
+def test_existing_entry_filter_excludes_canonical_id_regardless_of_verification_age() -> None:
     candidate = Candidate(display_name="表示名")
     entry = DictionaryEntry(
         canonical_id=candidate.canonical_id,
         reading="ひょうじめい",
         canonical_name="表示名",
         source_urls=["https://official.example"],
-        verified_at=datetime.now(UTC),
+        verified_at=datetime.now(UTC) - timedelta(days=365),
     )
-    filter_ = ExistingEntryFilter([entry], 180)
+    filter_ = ExistingEntryFilter([entry])
     assert not filter_.needs_research(candidate)
-    assert filter_.needs_research(candidate, entry.verified_at + timedelta(days=181))
 
 
 def test_existing_entry_filter_uses_platform_metadata_when_id_changes() -> None:
@@ -461,7 +460,61 @@ def test_existing_entry_filter_uses_platform_metadata_when_id_changes() -> None:
         verified_at=datetime.now(UTC),
     )
     candidate = Candidate(display_name="別表示", youtube_channel_id="UC123")
-    assert not ExistingEntryFilter([entry], 180).needs_research(candidate)
+    assert not ExistingEntryFilter([entry]).needs_research(candidate)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_does_not_contact_services_for_an_existing_entry(tmp_path: Path) -> None:
+    class MustNotContactPlatforms:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            raise AssertionError("existing entries must not request platform metrics")
+
+    class MustNotResearch:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            raise AssertionError("existing entries must not be researched")
+
+    class MustNotVerify:
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            raise AssertionError("existing entries must not be verified")
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidate = Candidate(display_name="既存候補", youtube_channel_id="UC123")
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidates.upsert(candidate)
+    entries = EntryRepository(data_dir / "entries.jsonl")
+    entries.replace(
+        [
+            DictionaryEntry(
+                canonical_id=candidate.canonical_id,
+                canonical_name="既存候補",
+                reading="きぞんこうほ",
+                youtube_channel_id="UC123",
+                source_urls=["https://official.example"],
+                verified_at=datetime.now(UTC) - timedelta(days=365),
+            )
+        ]
+    )
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=entries,
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=MustNotContactPlatforms(),
+        researcher=MustNotResearch(),
+        verifier=MustNotVerify(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+
+    assert await pipeline.run() == 0
 
 
 def test_settings_keeps_model_unset_when_env_value_is_empty(

@@ -64,7 +64,7 @@ class Pipeline:
         if len(retained_entries) != len(existing):
             self.entries.publish(retained_entries, artifact, self.compiler.render(retained_entries))
             existing = retained_entries
-        existing_filter = ExistingEntryFilter(existing, self.settings.reverify_after_days)
+        existing_filter = ExistingEntryFilter(existing)
         threshold = ThresholdFilter(
             self.settings.youtube_min_subscribers,
             self.settings.twitch_min_followers,
@@ -80,7 +80,7 @@ class Pipeline:
                 }
                 self._publish_entry(existing, candidate.pending_entry, artifact)
                 existing = self.entries.all()
-                existing_filter = ExistingEntryFilter(existing, self.settings.reverify_after_days)
+                existing_filter = ExistingEntryFilter(existing)
                 candidate.pending_entry = None
                 candidate.status = CandidateStatus.VERIFIED
                 self.candidates.replace(candidates)
@@ -135,7 +135,7 @@ class Pipeline:
             self.candidates.replace(candidates)
             self._publish_entry(existing, entry, artifact)
             existing = self.entries.all()
-            existing_filter = ExistingEntryFilter(existing, self.settings.reverify_after_days)
+            existing_filter = ExistingEntryFilter(existing)
             candidate.pending_entry = None
             candidate.status = CandidateStatus.VERIFIED
             self.candidates.replace(candidates)

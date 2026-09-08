@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     youtube_min_subscribers: int = Field(default=10_000, ge=0)
     twitch_min_followers: int = Field(default=5_000, ge=0)
     audience_threshold_mode: str = "any"
-    reverify_after_days: int = Field(default=180, ge=1)
     twitch_discovery_enabled: bool = True
     twitch_discovery_language: str = "ja"
     twitch_discovery_tag: str = "VTuber"

@@ -90,7 +90,7 @@ uv run vtuber-dictionary process                   # 永続化済み候補を調
 
 ### Twitch の定期更新（GitHub Actions）
 
-`.github/workflows/update-twitch.yml` は UTC の毎時 `:23`、4時間おき（JST では 00:23、04:23、08:23、12:23、16:23、20:23）に実行されます。手動実行も Actions 画面の **Update dictionary from Twitch** から可能です。事務所更新と同じキューを共有するため、同時に辞書データを更新しません。
+`.github/workflows/update-twitch.yml` は UTC の毎時 `:23`、4時間おき（JST では 01:23、05:23、09:23、13:23、17:23、21:23）に実行されます。手動実行も Actions 画面の **Update dictionary from Twitch** から可能です。事務所更新と同じキューを共有するため、同時に辞書データを更新しません。
 
 有効化前に、リポジトリの Actions secrets に `TWITCH_CLIENT_ID`、`TWITCH_CLIENT_SECRET`、`OPENAI_API_KEY` を、Actions variables に `OPENAI_MODEL` を設定してください。`YOUTUBE_API_KEY` は任意です。ワークフローは候補・辞書・配布成果物をコミットし、Release を公開するため、Actions の `GITHUB_TOKEN` に **Contents: read and write** を許可し、ブランチ保護を使用する場合は GitHub Actions の push を許可してください。必須設定が不足している場合は、候補収集を行わず明示的に失敗します。
 

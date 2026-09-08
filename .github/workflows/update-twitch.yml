@@ -2,7 +2,7 @@ name: Update dictionary from Twitch
 
 on:
   schedule:
-    # Every four hours at :23 UTC (00:23, 04:23, 08:23, 12:23, 16:23, 20:23 JST).
+    # Every four hours at :23 UTC (01:23, 05:23, 09:23, 13:23, 17:23, 21:23 JST).
     - cron: "23 */4 * * *"
   workflow_dispatch:
 

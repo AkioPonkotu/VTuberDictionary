@@ -52,6 +52,9 @@ jobs:
   update:
     needs: select-runner
     runs-on: ${{ fromJSON(needs.select-runner.outputs.runner_json) }}
+    # The self-hosted runner allows up to five days. Large Twitch discovery
+    # checkpoints can require more than GitHub Actions' six-hour default.
+    timeout-minutes: 720
     environment: dictionary-update
     steps:
       - uses: actions/checkout@v4

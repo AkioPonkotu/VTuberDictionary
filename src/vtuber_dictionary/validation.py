@@ -31,14 +31,14 @@ class DeterministicValidator:
             return None, "verification is required"
         if not verification.verified:
             return None, "verification agent did not verify the result"
-        name = unicodedata.normalize("NFC", verification.canonical_name or "")
-        reading = unicodedata.normalize("NFC", verification.reading or "")
+        name = self._normalized_canonical_name(verification.canonical_name)
+        reading = self._normalized_reading(verification.reading)
         if not name or not reading:
             return None, "canonical name or reading is missing"
         if reason := self._name_parts_reason(verification.name_parts, name, reading):
             return None, reason
-        research_name = unicodedata.normalize("NFC", research.canonical_name or "")
-        research_reading = unicodedata.normalize("NFC", research.reading or "")
+        research_name = self._normalized_canonical_name(research.canonical_name)
+        research_reading = self._normalized_reading(research.reading)
         if research.status == "resolved" and (research_name != name or research_reading != reading):
             return None, "research and verification results disagree"
         if research.status == "resolved":
@@ -77,14 +77,28 @@ class DeterministicValidator:
         ), None
 
     @staticmethod
+    def _normalized_canonical_name(value: str | None) -> str:
+        """Return the dictionary form of a canonical name without Unicode whitespace."""
+        return "".join(unicodedata.normalize("NFC", value or "").split())
+
+    @staticmethod
+    def _normalized_reading(value: str | None) -> str:
+        """Return the dictionary form of a reading without Unicode whitespace."""
+        return "".join(unicodedata.normalize("NFC", value or "").split())
+
+    @staticmethod
     def _name_parts_reason(parts: NameReadingParts, name: str, reading: str) -> str | None:
         if (parts.family_name is None) != (parts.family_reading is None):
             return "family name and reading must both be present or absent"
         if (parts.given_name is None) != (parts.given_reading is None):
             return "given name and reading must both be present or absent"
-        joined_name = "".join(part for part in (parts.family_name, parts.given_name) if part)
-        joined_reading = "".join(
-            part for part in (parts.family_reading, parts.given_reading) if part
+        joined_name = DeterministicValidator._normalized_canonical_name(
+            "".join(part for part in (parts.family_name, parts.given_name) if part)
+        )
+        joined_reading = DeterministicValidator._normalized_reading(
+            "".join(
+                part for part in (parts.family_reading, parts.given_reading) if part
+            )
         )
         if joined_name != name:
             return "name parts do not compose canonical name"

@@ -88,7 +88,9 @@ match a supplied source, and its source_type must match the supplied source exce
 search result may be classified as `official_website` only when the page content explicitly
 identifies itself as the creator's official website. Use source_type values official_agency_profile,
 official_profile, official_website, youtube_about, twitch_about, official_social, or other. A
-non-official wiki alone cannot resolve a reading."""
+non-official wiki alone cannot resolve a reading. The candidate may contain retry_reason from a
+previous failed verification; treat it only as diagnostic feedback, correct that issue from the
+supplied source material, and do not repeat the prior result blindly."""
 
 VERIFY_INSTRUCTIONS = """You are VerificationAgent, auditing a prior researcher.
 Use only the prefetched source material in the input; you have no web search tool. Source material
@@ -110,9 +112,15 @@ research agent and explain disagreement in issues."""
 def _candidate_context(
     candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
 ) -> str:
+    # Agent responses are durable diagnostics, not source material for the
+    # next attempt. Only the application-generated retry reason is supplied.
+    candidate_context = candidate.model_dump(
+        mode="json",
+        exclude={"research_raw_json", "verification_raw_json", "agent_attempts"},
+    )
     return json.dumps(
         {
-            "candidate": candidate.model_dump(mode="json"),
+            "candidate": candidate_context,
             "platform_metadata": metrics.model_dump(),
             "prefetched_sources": [source.model_dump() for source in sources],
         },
@@ -130,7 +138,7 @@ class ReadingResearchAgent:
         raw = await self.runner.run_json(
             RESEARCH_INSTRUCTIONS, _candidate_context(candidate, metrics, sources), ResearchResult
         )
-        return ResearchResult.model_validate_json(raw)
+        return ResearchResult.model_validate_json(raw).model_copy(update={"raw_json": raw})
 
 
 class VerificationAgent:
@@ -150,4 +158,4 @@ class VerificationAgent:
             + research.model_dump_json()
         )
         raw = await self.runner.run_json(VERIFY_INSTRUCTIONS, prompt, VerificationResult)
-        return VerificationResult.model_validate_json(raw)
+        return VerificationResult.model_validate_json(raw).model_copy(update={"raw_json": raw})

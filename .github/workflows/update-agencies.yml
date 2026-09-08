@@ -72,7 +72,7 @@ jobs:
           TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
           TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
           TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
-        run: uv run vtuber-dictionary process
+        run: uv run vtuber-dictionary process --source agency
       - name: Commit changed canonical data and artifact
         id: commit
         shell: bash

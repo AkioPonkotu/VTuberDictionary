@@ -42,7 +42,8 @@ async def test_update_checkpoints_discovery_before_processing(
         assert discovery_sources == {"agency"}
         calls.append("discover")
 
-    async def fake_process(settings: object) -> int:
+    async def fake_process(settings: object, processing_sources: set[str] | None = None) -> int:
+        assert processing_sources == {"agency"}
         calls.append("process")
         return 2
 
@@ -61,6 +62,23 @@ def test_main_runs_discovery_without_processing(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(cli, "discover", fake_discover)
     monkeypatch.setattr(sys, "argv", ["vtuber-dictionary", "discover", "--source", "twitch"])
+
+    cli.main()
+
+    assert received == [{"twitch"}]
+
+
+def test_main_passes_selected_processing_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    received: list[set[str]] = []
+
+    async def fake_process(settings: object, processing_sources: set[str] | None = None) -> int:
+        received.append(processing_sources or set())
+        return 0
+
+    monkeypatch.setattr(cli, "process", fake_process)
+    monkeypatch.setattr(
+        sys, "argv", ["vtuber-dictionary", "process", "--source", "twitch"]
+    )
 
     cli.main()
 

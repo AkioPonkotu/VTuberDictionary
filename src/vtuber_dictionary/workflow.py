@@ -5,12 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .dictionary import DictionaryCompiler
-from .domain import CandidateStatus, DictionaryEntry, ReviewRecord
+from .domain import AgentAttempt, CandidateStatus, DictionaryEntry, ReviewRecord, VerificationResult
 from .filtering import ExistingEntryFilter, KatakanaOrLatinNameFilter, ThresholdFilter
 from .ports import PlatformMetadataSource, ReadingResearcher, Verifier, WebSourcePrefetcher
 from .repository import CandidateRepository, EntryRepository, ReviewRepository
 from .settings import Settings
 from .validation import DeterministicValidator
+
+MAX_RESEARCH_ATTEMPTS = 3
 
 
 @dataclass
@@ -24,6 +26,7 @@ class Pipeline:
     validator: DeterministicValidator
     compiler: DictionaryCompiler
     settings: Settings
+    candidate_source_filter: set[str] | None = None
     web_sources: WebSourcePrefetcher | None = None
 
     async def run(self) -> int:
@@ -32,7 +35,13 @@ class Pipeline:
         self.entries.recover_publication(artifact_paths)
         self.reviews.recover_checkpoint(self.candidates)
         existing = self.entries.all()
-        candidates = self.candidates.all()
+        all_candidates = self.candidates.all()
+        candidates = [
+            candidate
+            for candidate in all_candidates
+            if self.candidate_source_filter is None
+            or candidate.discovery_sources & self.candidate_source_filter
+        ]
         name_filter = KatakanaOrLatinNameFilter()
         excluded_ids = {
             candidate.canonical_id
@@ -54,7 +63,7 @@ class Pipeline:
                 if candidate.canonical_id in excluded_ids:
                     candidate.status = CandidateStatus.REJECTED
                     candidate.pending_entry = None
-            self.candidates.replace(candidates)
+            self.candidates.replace(all_candidates)
         retained_entries = [
             entry
             for entry in existing
@@ -82,7 +91,7 @@ class Pipeline:
                 existing_filter = ExistingEntryFilter(existing)
                 candidate.pending_entry = None
                 candidate.status = CandidateStatus.VERIFIED
-                self.candidates.replace(candidates)
+                self.candidates.replace(all_candidates)
                 additions += int(was_new)
                 continue
             if candidate.status in {
@@ -94,30 +103,56 @@ class Pipeline:
             if candidate.agency is None and not threshold.accepts(metrics):
                 continue
             sources = await self.web_sources.fetch(candidate, metrics) if self.web_sources else []
-            research = await self.researcher.research(candidate, metrics, sources)
-            if research.canonical_name and name_filter.excludes_name(research.canonical_name):
-                candidate.status = CandidateStatus.REJECTED
-                self.candidates.replace(candidates)
+            entry: DictionaryEntry | None = None
+            reason: str | None = candidate.retry_reason
+            while candidate.research_attempts < MAX_RESEARCH_ATTEMPTS:
+                attempt = AgentAttempt(number=candidate.research_attempts + 1)
+                candidate.research_attempts += 1
+                candidate.agent_attempts.append(attempt)
+                self.candidates.replace(all_candidates)
+
+                research = await self.researcher.research(candidate, metrics, sources)
+                candidate.research_raw_json = research.raw_json
+                attempt.research_raw_json = research.raw_json
+                self.candidates.replace(all_candidates)
+                if research.canonical_name and name_filter.excludes_name(research.canonical_name):
+                    candidate.status = CandidateStatus.REJECTED
+                    self.candidates.replace(all_candidates)
+                    break
+
+                verification = await self.verifier.verify(candidate, research, metrics, sources)
+                candidate.verification_raw_json = verification.raw_json
+                attempt.verification_raw_json = verification.raw_json
+                self.candidates.replace(all_candidates)
+                if (
+                    verification.canonical_name
+                    and name_filter.excludes_name(verification.canonical_name)
+                ):
+                    candidate.status = CandidateStatus.REJECTED
+                    self.candidates.replace(all_candidates)
+                    break
+
+                prior = [
+                    entry for entry in existing if entry.canonical_id != candidate.canonical_id
+                ]
+                entry, reason = self.validator.validate(candidate, research, verification, prior)
+                if entry is not None:
+                    break
+
+                candidate.retry_reason = self._retry_reason(reason, verification)
+                attempt.failure_reason = candidate.retry_reason
+                self.candidates.replace(all_candidates)
+
+            if candidate.status == CandidateStatus.REJECTED:
                 continue
-            verification = await self.verifier.verify(candidate, research, metrics, sources)
-            if (
-                verification
-                and verification.canonical_name
-                and name_filter.excludes_name(verification.canonical_name)
-            ):
-                candidate.status = CandidateStatus.REJECTED
-                self.candidates.replace(candidates)
-                continue
-            prior = [entry for entry in existing if entry.canonical_id != candidate.canonical_id]
-            entry, reason = self.validator.validate(candidate, research, verification, prior)
             if entry is None:
                 candidate.status = CandidateStatus.REVIEW_REQUIRED
                 self.reviews.checkpoint_review(
                     self.candidates,
-                    candidates,
+                    all_candidates,
                     ReviewRecord(
                         canonical_id=candidate.canonical_id,
-                        reason=reason or "unknown",
+                        reason=candidate.retry_reason or reason or "unknown",
                         candidate=candidate,
                     ),
                 )
@@ -125,13 +160,13 @@ class Pipeline:
             # Persist the agent result before attempting the multi-file
             # publication.  The next run can resume from this exact entry.
             candidate.pending_entry = entry
-            self.candidates.replace(candidates)
+            self.candidates.replace(all_candidates)
             self._publish_entry(existing, entry)
             existing = self.entries.all()
             existing_filter = ExistingEntryFilter(existing)
             candidate.pending_entry = None
             candidate.status = CandidateStatus.VERIFIED
-            self.candidates.replace(candidates)
+            self.candidates.replace(all_candidates)
             additions += 1
         if not all(path.exists() for path in artifact_paths):
             self._publish_entries(existing)
@@ -148,3 +183,10 @@ class Pipeline:
             for artifact in self.compiler.artifacts(entries)
         }
         self.entries.publish(entries, artifacts)
+
+    @staticmethod
+    def _retry_reason(reason: str | None, verification: VerificationResult) -> str:
+        if not verification.verified:
+            issues = "; ".join(verification.issues)
+            return f"verification rejected: {issues or reason or 'no reason supplied'}"
+        return reason or "unknown validation failure"

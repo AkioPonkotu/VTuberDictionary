@@ -94,13 +94,16 @@ class FakeStreams:
 class FakeRunner:
     def __init__(self, responses: list[str]) -> None:
         self.responses = responses
+        self.returned: list[str] = []
         self.response_models: list[type[object]] = []
         self.prompts: list[str] = []
 
     async def run_json(self, instructions: str, prompt: str, response_model: type[object]) -> str:
         self.response_models.append(response_model)
         self.prompts.append(prompt)
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        self.returned.append(response)
+        return response
 
 
 @pytest.mark.asyncio
@@ -543,6 +546,86 @@ async def test_pipeline_does_not_contact_services_for_an_existing_entry(tmp_path
     assert await pipeline.run() == 0
 
 
+@pytest.mark.asyncio
+async def test_pipeline_processes_only_candidates_matching_source_filter(tmp_path: Path) -> None:
+    evidence = [
+        Evidence(url="https://twitch.tv/streamer", source_type="twitch_about", claim="name")
+    ]
+    processed: list[str] = []
+
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            assert candidate.display_name == "星街すいせい"
+            return AudienceMetrics(twitch_followers=5_000)
+
+    class Researcher:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            processed.append(candidate.display_name)
+            return ResearchResult(
+                canonical_name="星街すいせい",
+                reading="ほしまちすいせい",
+                name_parts=NameReadingParts(
+                    family_name="星街",
+                    given_name="すいせい",
+                    family_reading="ほしまち",
+                    given_reading="すいせい",
+                ),
+                confidence=1,
+                evidence=evidence,
+                status="resolved",
+            )
+
+    class Verifier:
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            return VerificationResult(
+                verified=True,
+                canonical_name=research.canonical_name,
+                reading=research.reading,
+                name_parts=research.name_parts,
+                confidence=1,
+                evidence=evidence,
+            )
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    agency = candidates.upsert(
+        Candidate(display_name="白星あわわ", agency="Agency", discovery_sources={"agency"})
+    )
+    twitch = candidates.upsert(
+        Candidate(
+            display_name="星街すいせい",
+            twitch_user_id="1",
+            discovery_sources={"twitch_vtuber_tag"},
+        )
+    )
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=Researcher(),
+        verifier=Verifier(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+        candidate_source_filter={"twitch_vtuber_tag"},
+    )
+
+    assert await pipeline.run() == 1
+    assert processed == ["星街すいせい"]
+    stored = {candidate.canonical_id: candidate for candidate in candidates.all()}
+    assert stored[agency.canonical_id].status == CandidateStatus.DISCOVERED
+    assert stored[twitch.canonical_id].status == CandidateStatus.VERIFIED
+
+
 def test_settings_keeps_model_unset_when_env_value_is_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -569,6 +652,8 @@ async def test_research_and_verification_parse_structured_output() -> None:
     research = await ReadingResearchAgent(runner).research(candidate, metrics, sources)
     verified = await VerificationAgent(runner).verify(candidate, research, metrics, sources)
     assert research.status == "resolved" and verified.verified
+    assert research.raw_json == runner.returned[0]
+    assert verified.raw_json == runner.returned[1]
     assert research.name_parts.family_reading == "ほしまち"
     assert verified.name_parts.given_reading == "すいせい"
     assert runner.response_models == [ResearchResult, VerificationResult]
@@ -714,6 +799,42 @@ def test_deterministic_validator_and_compiler(tmp_path: Path) -> None:
     output = tmp_path / "dictionary.tsv"
     DictionaryCompiler().compile([entry], output)
     assert output.read_text("utf-8") == "ほしまちすいせい\t星街すいせい\n"
+
+
+def test_validator_removes_unicode_whitespace_from_canonical_names() -> None:
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="name")
+    ]
+    parts = NameReadingParts(
+        family_name="雪花",
+        given_name="ラミィ",
+        family_reading="ゆきはな",
+        given_reading="らみぃ",
+    )
+    research = ResearchResult(
+        canonical_name="雪花 ラミィ",
+        reading="ゆきはな らみぃ",
+        name_parts=parts,
+        confidence=1,
+        evidence=evidence,
+        status="resolved",
+    )
+    verification = VerificationResult(
+        verified=True,
+        canonical_name="雪花　ラミィ",
+        reading="ゆきはな らみぃ",
+        name_parts=parts,
+        confidence=1,
+        evidence=evidence,
+    )
+
+    entry, reason = DeterministicValidator().validate(
+        Candidate(display_name="雪花ラミィ"), research, verification, []
+    )
+
+    assert reason is None
+    assert entry is not None
+    assert entry.canonical_name == "雪花ラミィ"
 
 
 def test_platform_exporters_use_the_required_encoding_format_and_csv_escaping() -> None:
@@ -864,6 +985,158 @@ def test_validator_rejects_a_missing_family_reading() -> None:
 
     assert entry is None
     assert reason == "family name and reading must both be present or absent"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_persists_agent_raw_json_for_a_reviewed_candidate(tmp_path: Path) -> None:
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="name")
+    ]
+    parts = NameReadingParts(
+        family_name="本阿弥",
+        given_name="あずさ",
+        family_reading="ほんあみ",
+        given_reading="あずさ",
+    )
+
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics()
+
+    class Researcher:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            return ResearchResult(
+                canonical_name="本阿弥あずさ",
+                reading="あずさ",
+                name_parts=parts,
+                confidence=1,
+                evidence=evidence,
+                status="resolved",
+                raw_json='{"agent":"research"}',
+            )
+
+    class Verifier:
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            return VerificationResult(
+                verified=True,
+                canonical_name="本阿弥あずさ",
+                reading="あずさ",
+                name_parts=parts,
+                confidence=1,
+                evidence=evidence,
+                raw_json='{"agent":"verification"}',
+            )
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidates.upsert(Candidate(display_name="本阿弥あずさ", agency="Agency"))
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=Researcher(),
+        verifier=Verifier(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+
+    assert await pipeline.run() == 0
+    stored = candidates.all()[0]
+    assert stored.status == CandidateStatus.REVIEW_REQUIRED
+    assert stored.research_raw_json == '{"agent":"research"}'
+    assert stored.verification_raw_json == '{"agent":"verification"}'
+
+
+@pytest.mark.asyncio
+async def test_pipeline_researches_after_verification_rejection(tmp_path: Path) -> None:
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="name")
+    ]
+    calls: list[str | None] = []
+
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics()
+
+    class Researcher:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            calls.append(candidate.retry_reason)
+            return ResearchResult(
+                canonical_name="星街すいせい",
+                reading="ほしまちすいせい",
+                name_parts=NameReadingParts(
+                    family_name="星街",
+                    given_name="すいせい",
+                    family_reading="ほしまち",
+                    given_reading="すいせい",
+                ),
+                confidence=1,
+                evidence=evidence,
+                status="resolved",
+                raw_json=f'{{"research_attempt":{len(calls)}}}',
+            )
+
+    class Verifier:
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            attempt = len(calls)
+            return VerificationResult(
+                verified=attempt == 3,
+                canonical_name=research.canonical_name,
+                reading=research.reading,
+                name_parts=research.name_parts,
+                confidence=1,
+                evidence=evidence,
+                issues=[] if attempt == 3 else ["confirm the split reading"],
+                raw_json=f'{{"verification_attempt":{attempt}}}',
+            )
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidates.upsert(Candidate(display_name="星街すいせい", agency="Agency"))
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=Researcher(),
+        verifier=Verifier(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+
+    assert await pipeline.run() == 1
+    stored = candidates.all()[0]
+    assert calls == [
+        None,
+        "verification rejected: confirm the split reading",
+        "verification rejected: confirm the split reading",
+    ]
+    assert stored.status == CandidateStatus.VERIFIED
+    assert stored.research_attempts == 3
+    assert [attempt.failure_reason for attempt in stored.agent_attempts] == [
+        "verification rejected: confirm the split reading",
+        "verification rejected: confirm the split reading",
+        None,
+    ]
 
 
 @pytest.mark.asyncio

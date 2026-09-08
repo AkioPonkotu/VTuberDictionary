@@ -32,7 +32,7 @@ jobs:
       - run: uv run pytest
       - run: uv run ruff check .
       - run: uv run mypy src
-      - name: Run agency discovery and safe update pipeline
+      - name: Discover agency candidates
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
@@ -47,7 +47,34 @@ jobs:
           TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
           TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
           TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
-        run: uv run vtuber-dictionary update --source agency
+        run: uv run vtuber-dictionary discover --source agency
+      - name: Checkpoint discovered candidates before research
+        shell: bash
+        run: |
+          git add -A data
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: checkpoint agency discovery"
+          git push
+      - name: Run safe update pipeline from checkpointed candidates
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          YOUTUBE_MIN_SUBSCRIBERS: ${{ vars.YOUTUBE_MIN_SUBSCRIBERS || '10000' }}
+          TWITCH_MIN_FOLLOWERS: ${{ vars.TWITCH_MIN_FOLLOWERS || '5000' }}
+          AUDIENCE_THRESHOLD_MODE: ${{ vars.AUDIENCE_THRESHOLD_MODE || 'any' }}
+          REVERIFY_AFTER_DAYS: ${{ vars.REVERIFY_AFTER_DAYS || '180' }}
+          TWITCH_DISCOVERY_ENABLED: ${{ vars.TWITCH_DISCOVERY_ENABLED || 'true' }}
+          TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
+          TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
+          TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
+        run: uv run vtuber-dictionary process
       - name: Commit changed canonical data and artifact
         id: commit
         shell: bash

@@ -34,8 +34,8 @@ from .web_sources import TwitchSearchSourcePrefetcher
 from .workflow import Pipeline
 
 
-async def update(settings: Settings, discovery_sources: set[str] | None = None) -> int:
-    """Discover candidates first, then run the safe, threshold-gated pipeline."""
+async def discover(settings: Settings, discovery_sources: set[str] | None = None) -> None:
+    """Persist candidates discovered from the selected sources."""
     enabled_sources = discovery_sources or {"agency", "twitch"}
     candidate_repo = CandidateRepository(settings.data_dir / "candidates.jsonl")
     agency_repo = AgencyRepository(settings.data_dir / "agencies.json")
@@ -66,6 +66,19 @@ async def update(settings: Settings, discovery_sources: set[str] | None = None) 
                     settings.data_dir / "twitch_discovery_checkpoint.json"
                 ),
             )
+
+
+async def process(settings: Settings) -> int:
+    """Research and publish already-persisted candidates."""
+    candidate_repo = CandidateRepository(settings.data_dir / "candidates.jsonl")
+    twitch: TwitchHelixClient | None = None
+    if settings.twitch_client_id and settings.twitch_client_secret:
+        token = await twitch_app_access_token(
+            settings.twitch_client_id, settings.twitch_client_secret.get_secret_value()
+        )
+        twitch = TwitchHelixClient(
+            settings.twitch_client_id, token, max_pages=settings.twitch_discovery_max_pages
+        )
     youtube = (
         YouTubeDataClient(settings.youtube_api_key.get_secret_value())
         if settings.youtube_api_key
@@ -104,22 +117,38 @@ async def update(settings: Settings, discovery_sources: set[str] | None = None) 
     return await pipeline.run()
 
 
+async def update(settings: Settings, discovery_sources: set[str] | None = None) -> int:
+    """Discover candidates first, then run the safe, threshold-gated pipeline."""
+    await discover(settings, discovery_sources)
+    return await process(settings)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate the verified Japanese VTuber IME dictionary."
     )
-    parser.add_argument("command", nargs="?", choices=["update"], default="update")
+    parser.add_argument(
+        "command", nargs="?", choices=["update", "discover", "process"], default="update"
+    )
     parser.add_argument(
         "--source",
         action="append",
         choices=("agency", "twitch"),
         dest="sources",
-        help="Run only the selected discovery source; specify more than once to combine sources.",
+        help="For update/discover: select discovery sources; specify more than once to combine.",
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     # httpx includes query strings in its INFO request logs.  API keys must never be logged.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpx2").setLevel(logging.WARNING)
-    count = asyncio.run(update(Settings(), set(args.sources or [])))
+    sources = set(args.sources or [])
+    if args.command == "discover":
+        asyncio.run(discover(Settings(), sources))
+        logging.getLogger(__name__).info("dictionary_discovery_complete")
+        return
+    if args.command == "process":
+        count = asyncio.run(process(Settings()))
+    else:
+        count = asyncio.run(update(Settings(), sources))
     logging.getLogger(__name__).info("dictionary_update_complete", extra={"new_entries": count})

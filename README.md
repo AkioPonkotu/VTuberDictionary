@@ -80,6 +80,15 @@ uv run vtuber-dictionary update --source twitch
 
 `--source` は複数回指定できます。指定しない場合は事務所・Twitch の両方を取得します。これは候補の**発見元**だけを限定するオプションで、既存候補の YouTube/Twitch 統計による検証は維持されます。
 
+CI では中断後に発見済み候補を再利用できるよう、発見と後続処理を分けて実行できます。
+
+```powershell
+uv run vtuber-dictionary discover --source agency  # 候補だけを永続化
+uv run vtuber-dictionary process                   # 永続化済み候補を調査・検証・公開
+```
+
+`update` は従来どおり両方を順に実行します。GitHub Actions の定期更新では `discover` の結果を先にコミットしてから `process` を実行するため、後者の外部 API または Agent 呼び出しが失敗しても、次回実行は発見済み候補から再開します。
+
 OpenAI の認証情報がない場合も、閾値に達した候補が現れるまで候補収集は実行できます。その候補を調査・採用する段階で停止するため、未検証の情報が辞書へ入ることはありません。
 
 実行中の永続データは次のとおりです。

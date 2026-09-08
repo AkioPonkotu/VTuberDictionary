@@ -2,7 +2,7 @@
 
 日本の VTuber 名を、ひらがなの読みから正式名称へ変換する IME 辞書作成用 Python パイプラインです。
 
-## 辞書を使う（開発不要）
+## 辞書を使う
 
 [Releases](https://github.com/AkioPonkotu/VTuberDictionary/releases/latest) の **Assets** から、使う OS 用のファイルをダウンロードします。
 

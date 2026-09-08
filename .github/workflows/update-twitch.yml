@@ -5,13 +5,19 @@ on:
     # Every four hours at :23 UTC (01:23, 05:23, 09:23, 13:23, 17:23, 21:23 JST).
     - cron: "23 */4 * * *"
   workflow_dispatch:
+    inputs:
+      runner_smoke_test:
+        description: Verify the selected runner without updating dictionary data.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 # The Twitch and agency workflows both update the same versioned state.
 concurrency:
-  group: dictionary-update
+  group: ${{ inputs.runner_smoke_test && 'twitch-runner-smoke-test' || 'dictionary-update' }}
   # Preserve every discovery checkpoint rather than interrupting an active run.
   cancel-in-progress: false
   queue: max
@@ -49,7 +55,20 @@ jobs:
             echo 'runner_kind=github-hosted' >> "$GITHUB_OUTPUT"
           fi
 
+  verify-runner:
+    if: ${{ inputs.runner_smoke_test }}
+    needs: select-runner
+    runs-on: ${{ fromJSON(needs.select-runner.outputs.runner_json) }}
+    steps:
+      - name: Verify the local Twitch runner assignment
+        shell: bash
+        run: |
+          test "$RUNNER_ENVIRONMENT" = "self-hosted"
+          test "$RUNNER_OS" = "Linux"
+          test "$RUNNER_NAME" = "vtuberdictionary-wsl"
+
   update:
+    if: ${{ !inputs.runner_smoke_test }}
     needs: select-runner
     runs-on: ${{ fromJSON(needs.select-runner.outputs.runner_json) }}
     environment: dictionary-update

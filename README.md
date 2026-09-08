@@ -1,6 +1,6 @@
 # VTuber Dictionary
 
-日本の VTuber 名を、ひらがなの読みから正式名称へ変換する UTF-8 IME 辞書作成用 Python パイプラインです。
+日本の VTuber 名を、ひらがなの読みから正式名称へ変換する IME 辞書作成用 Python パイプラインです。
 
 ## アーキテクチャ
 
@@ -95,18 +95,27 @@ OpenAI の認証情報がない場合も、閾値に達した候補が現れる�
 ```text
 data/agencies.json             Versioned agency registry
 data/candidates.jsonl          Candidate identity cache (execution state)
-data/entries.jsonl             Verified canonical data
-data/review_required.jsonl     Rejected/ambiguous cases and reasons
-data/twitch_discovery_checkpoint.json  Twitch page cursor while a scan is incomplete
-dist/vtuber_dictionary.tsv     Distribution artifact
+data/entries.jsonl                         Verified canonical data
+data/review_required.jsonl                 Rejected/ambiguous cases and reasons
+data/twitch_discovery_checkpoint.json      Twitch page cursor while a scan is incomplete
+dist/vtuber_dictionary.tsv                 Legacy UTF-8 two-column TSV
+dist/vtuber_dictionary_msime.txt           Windows Microsoft IME bulk-registration dictionary
+dist/vtuber_dictionary_macos.csv           macOS Japanese Input professional dictionary
 ```
 
-候補ごとに、Agent の確定結果は先に `candidates.jsonl` へチェックポイントされます。`entries.jsonl` と TSV の
-更新は書込み先行ジャーナルで保護され、途中停止した場合は次回起動時に同じ確定内容を両方へ再適用します。
+候補ごとに、Agent の確定結果は先に `candidates.jsonl` へチェックポイントされます。`entries.jsonl` と全配布成果物の
+更新は書込み先行ジャーナルで保護され、途中停止した場合は次回起動時に同じ確定内容をすべてへ再適用します。
 レビュー状態とレビュー記録も同じ方式で回復するため、再実行で同じレビュー行を追加しません。Twitch は候補ページを
 保存してから次ページのカーソルを保存するので、失敗時は最大でも直前のページを安全に再取得します。
 
-出力の各行は `reading<TAB>canonical_name` です。例: `ほしまちすいせい<TAB>星街すいせい`。
+配布形式は次のとおりです。
+
+| 対象 | ファイル | 1行の形式 |
+| --- | --- | --- |
+| Windows Microsoft IME | `vtuber_dictionary_msime.txt` | `reading<TAB>word<TAB>固有名詞`（UTF-16 LE、BOM、CRLF） |
+| macOS 日本語入力 | `vtuber_dictionary_macos.csv` | `reading,word,proper noun`（CSVエスケープ済み） |
+
+macOS版は専門辞書として読み込みます。出力時に読み32文字以内、語句64文字以内、CSVエスケープ後の1行127文字以内を検査します。
 
 ## 調査・検証ポリシー
 

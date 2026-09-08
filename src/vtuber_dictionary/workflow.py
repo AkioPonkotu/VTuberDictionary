@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from .dictionary import DictionaryCompiler
 from .domain import CandidateStatus, DictionaryEntry, ReviewRecord
@@ -29,8 +28,8 @@ class Pipeline:
 
     async def run(self) -> int:
         """Return accepted additions while checkpointing every external-result boundary."""
-        artifact = self.settings.dist_dir / "vtuber_dictionary.tsv"
-        self.entries.recover_publication(artifact)
+        artifact_paths = self.compiler.artifact_paths(self.settings.dist_dir)
+        self.entries.recover_publication(artifact_paths)
         self.reviews.recover_checkpoint(self.candidates)
         existing = self.entries.all()
         candidates = self.candidates.all()
@@ -62,7 +61,7 @@ class Pipeline:
             if entry.canonical_id not in excluded_ids | excluded_entry_ids
         ]
         if len(retained_entries) != len(existing):
-            self.entries.publish(retained_entries, artifact, self.compiler.render(retained_entries))
+            self._publish_entries(retained_entries)
             existing = retained_entries
         existing_filter = ExistingEntryFilter(existing)
         threshold = ThresholdFilter(
@@ -78,7 +77,7 @@ class Pipeline:
                 was_new = candidate.pending_entry.canonical_id not in {
                     entry.canonical_id for entry in existing
                 }
-                self._publish_entry(existing, candidate.pending_entry, artifact)
+                self._publish_entry(existing, candidate.pending_entry)
                 existing = self.entries.all()
                 existing_filter = ExistingEntryFilter(existing)
                 candidate.pending_entry = None
@@ -133,21 +132,25 @@ class Pipeline:
             # publication.  The next run can resume from this exact entry.
             candidate.pending_entry = entry
             self.candidates.replace(candidates)
-            self._publish_entry(existing, entry, artifact)
+            self._publish_entry(existing, entry)
             existing = self.entries.all()
             existing_filter = ExistingEntryFilter(existing)
             candidate.pending_entry = None
             candidate.status = CandidateStatus.VERIFIED
             self.candidates.replace(candidates)
             additions += 1
-        if not artifact.exists():
-            self.entries.publish(existing, artifact, self.compiler.render(existing))
+        if not all(path.exists() for path in artifact_paths):
+            self._publish_entries(existing)
         return additions
 
-    def _publish_entry(
-        self, existing: list[DictionaryEntry], entry: DictionaryEntry, artifact: Path
-    ) -> None:
+    def _publish_entry(self, existing: list[DictionaryEntry], entry: DictionaryEntry) -> None:
         by_identity = {item.canonical_id: item for item in existing}
         by_identity[entry.canonical_id] = entry
-        all_entries = list(by_identity.values())
-        self.entries.publish(all_entries, artifact, self.compiler.render(all_entries))
+        self._publish_entries(list(by_identity.values()))
+
+    def _publish_entries(self, entries: list[DictionaryEntry]) -> None:
+        artifacts = {
+            self.settings.dist_dir / artifact.filename: artifact.payload
+            for artifact in self.compiler.artifacts(entries)
+        }
+        self.entries.publish(entries, artifacts)

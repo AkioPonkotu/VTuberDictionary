@@ -92,12 +92,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          artifact_sha="$(git log -1 --format=%H -- dist/vtuber_dictionary.tsv)"
+          artifact_sha="$(git log -1 --format=%H -- dist/vtuber_dictionary.tsv dist/vtuber_dictionary_msime.txt dist/vtuber_dictionary_macos.csv)"
           test -n "$artifact_sha"
           tag="dictionary-${artifact_sha}"
-          asset="$(mktemp)"
-          trap 'rm -f "$asset"' EXIT
-          git show "${artifact_sha}:dist/vtuber_dictionary.tsv" > "$asset"
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" \
               --draft \
@@ -105,7 +102,12 @@ jobs:
               --title "VTuber IME dictionary ${artifact_sha}" \
               --notes "Automated dictionary update from Twitch live discovery."
           fi
-          if ! gh release view "$tag" --json assets --jq '.assets[].name' | grep -Fx 'vtuber_dictionary.tsv'; then
-            gh release upload "$tag" "${asset}#vtuber_dictionary.tsv"
-          fi
+          for artifact in vtuber_dictionary.tsv vtuber_dictionary_msime.txt vtuber_dictionary_macos.csv; do
+            asset="$(mktemp)"
+            git show "${artifact_sha}:dist/${artifact}" > "$asset"
+            if ! gh release view "$tag" --json assets --jq '.assets[].name' | grep -Fx "$artifact"; then
+              gh release upload "$tag" "${asset}#${artifact}"
+            fi
+            rm -f "$asset"
+          done
           gh release edit "$tag" --draft=false

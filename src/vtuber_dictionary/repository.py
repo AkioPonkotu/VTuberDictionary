@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from base64 import b64decode, b64encode
 from collections.abc import Iterable
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -40,12 +41,12 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _write_text_atomic(path: Path, payload: str) -> None:
+def _write_bytes_atomic(path: Path, payload: bytes) -> None:
     """Atomically replace ``path`` with crash-durable file contents."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
-        with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
+        with NamedTemporaryFile("wb", dir=path.parent, delete=False) as tmp:
             tmp.write(payload)
             tmp.flush()
             os.fsync(tmp.fileno())
@@ -56,6 +57,10 @@ def _write_text_atomic(path: Path, payload: str) -> None:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
         raise
+
+
+def _write_text_atomic(path: Path, payload: str) -> None:
+    _write_bytes_atomic(path, payload.encode("utf-8"))
 
 
 def _remove_durable(path: Path) -> None:
@@ -160,46 +165,88 @@ class EntryRepository:
     def _transaction_path(self) -> Path:
         return self.path.parent / ".dictionary-transaction.json"
 
-    def recover_publication(self, artifact: Path) -> None:
-        """Finish a previously journaled entry/TSV publication, if any."""
+    def recover_publication(self, artifacts: Iterable[Path]) -> None:
+        """Finish a previously journaled canonical-data/artifact publication, if any."""
         if not self._transaction_path.exists():
             return
         try:
             transaction = json.loads(self._transaction_path.read_text("utf-8"))
             entries_payload = transaction["entries_jsonl"]
-            artifact_payload = transaction["artifact_tsv"]
             expected_entries = transaction["entries_path"]
-            expected_artifact = transaction["artifact_path"]
         except (KeyError, TypeError, json.JSONDecodeError) as exc:
             raise RuntimeError("invalid dictionary publication journal") from exc
-        if not all(isinstance(item, str) for item in (entries_payload, artifact_payload)):
+        if not isinstance(entries_payload, str):
             raise RuntimeError("invalid dictionary publication journal payload")
-        if (
-            expected_entries != str(self.path.resolve())
-            or expected_artifact != str(artifact.resolve())
-        ):
+        if expected_entries != str(self.path.resolve()):
+            raise RuntimeError("dictionary publication journal targets a different output")
+        requested_paths = {str(path.resolve()): path for path in artifacts}
+        journal_artifacts = self._journal_artifacts(transaction)
+        journal_paths = {path for path, _ in journal_artifacts}
+        if not journal_paths.issubset(requested_paths):
             raise RuntimeError("dictionary publication journal targets a different output")
         _write_text_atomic(self.path, entries_payload)
-        _write_text_atomic(artifact, artifact_payload)
+        for journal_path, payload in journal_artifacts:
+            _write_bytes_atomic(requested_paths[journal_path], payload)
         _remove_durable(self._transaction_path)
 
-    def publish(
-        self, entries: Iterable[DictionaryEntry], artifact: Path, artifact_payload: str
-    ) -> None:
-        """Publish canonical data and its TSV using a replayable write-ahead journal."""
-        self.recover_publication(artifact)
+    @staticmethod
+    def _journal_artifacts(transaction: object) -> list[tuple[str, bytes]]:
+        if not isinstance(transaction, dict):
+            raise RuntimeError("invalid dictionary publication journal")
+        # Journals written before multiple artifacts existed remain recoverable.
+        if "artifacts" not in transaction:
+            try:
+                path = transaction["artifact_path"]
+                payload = transaction["artifact_tsv"]
+            except KeyError as exc:
+                raise RuntimeError("invalid dictionary publication journal") from exc
+            if not isinstance(path, str) or not isinstance(payload, str):
+                raise RuntimeError("invalid dictionary publication journal payload")
+            return [(path, payload.encode("utf-8"))]
+        raw_artifacts = transaction["artifacts"]
+        if not isinstance(raw_artifacts, list) or not raw_artifacts:
+            raise RuntimeError("invalid dictionary publication journal payload")
+        artifacts: list[tuple[str, bytes]] = []
+        for artifact in raw_artifacts:
+            if not isinstance(artifact, dict):
+                raise RuntimeError("invalid dictionary publication journal payload")
+            path = artifact.get("path")
+            encoded_payload = artifact.get("payload_base64")
+            if not isinstance(path, str) or not isinstance(encoded_payload, str):
+                raise RuntimeError("invalid dictionary publication journal payload")
+            try:
+                payload = b64decode(encoded_payload, validate=True)
+            except ValueError as exc:
+                raise RuntimeError("invalid dictionary publication journal payload") from exc
+            artifacts.append((path, payload))
+        if len({path for path, _ in artifacts}) != len(artifacts):
+            raise RuntimeError("invalid dictionary publication journal payload")
+        return artifacts
+
+    def publish(self, entries: Iterable[DictionaryEntry], artifacts: dict[Path, bytes]) -> None:
+        """Publish canonical data and all artifacts using a replayable write-ahead journal."""
+        if not artifacts:
+            raise ValueError("at least one dictionary artifact is required")
+        self.recover_publication(artifacts)
         entries_payload = _jsonl_payload(entries)
         transaction = {
             "entries_path": str(self.path.resolve()),
-            "artifact_path": str(artifact.resolve()),
             "entries_jsonl": entries_payload,
-            "artifact_tsv": artifact_payload,
+            "artifacts": [
+                {
+                    "path": str(path.resolve()),
+                    "payload_base64": b64encode(payload).decode("ascii"),
+                }
+                for path, payload in sorted(
+                    artifacts.items(), key=lambda item: str(item[0].resolve())
+                )
+            ],
         }
         _write_text_atomic(
             self._transaction_path,
             json.dumps(transaction, ensure_ascii=False, separators=(",", ":")),
         )
-        self.recover_publication(artifact)
+        self.recover_publication(artifacts)
 
 
 class ReviewRepository:

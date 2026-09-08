@@ -9,7 +9,7 @@ import pytest
 from vtuber_dictionary import repository
 from vtuber_dictionary.agency_source import AgencyPageTalentSource
 from vtuber_dictionary.agents import ReadingResearchAgent, VerificationAgent
-from vtuber_dictionary.dictionary import DictionaryCompiler
+from vtuber_dictionary.dictionary import DictionaryCompiler, MacOsImeExporter, MicrosoftImeExporter
 from vtuber_dictionary.discovery import AgencyDiscovery, TwitchDiscovery
 from vtuber_dictionary.domain import (
     Agency,
@@ -669,6 +669,41 @@ def test_deterministic_validator_and_compiler(tmp_path: Path) -> None:
     assert output.read_text("utf-8") == "ほしまちすいせい\t星街すいせい\n"
 
 
+def test_platform_exporters_use_the_required_encoding_format_and_csv_escaping() -> None:
+    entry = DictionaryEntry(
+        canonical_id="quoted",
+        reading="よみ",
+        canonical_name='語句, "引用"',
+        source_urls=[],
+    )
+
+    assert MicrosoftImeExporter().export([entry]) == (
+        b"\xff\xfe" + "よみ\t語句, \"引用\"\t固有名詞\r\n".encode("utf-16-le")
+    )
+    assert MacOsImeExporter().export([entry]).decode("utf-8") == (
+        'よみ,"語句, ""引用""",proper noun\n'
+    )
+
+
+@pytest.mark.parametrize(
+    ("reading", "canonical_name", "message"),
+    [
+        ("あ" * 33, "語句", "reading exceeds 32"),
+        ("よみ", "語" * 65, "word exceeds 64"),
+        ("あ" * 32, '"' * 64, "line exceeds 127"),
+    ],
+)
+def test_macos_exporter_enforces_professional_dictionary_limits(
+    reading: str, canonical_name: str, message: str
+) -> None:
+    entry = DictionaryEntry(
+        canonical_id="too-long", reading=reading, canonical_name=canonical_name, source_urls=[]
+    )
+
+    with pytest.raises(ValueError, match=message):
+        MacOsImeExporter().export([entry])
+
+
 def test_validator_rejects_unverified_and_invalid_reading() -> None:
     candidate = Candidate(display_name="X")
     invalid = VerificationResult(
@@ -1038,7 +1073,8 @@ async def test_pipeline_removes_existing_latin_entry_when_candidate_has_japanese
 def test_entry_publication_recovers_after_the_first_file_is_replaced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    entries_path, artifact = tmp_path / "data" / "entries.jsonl", tmp_path / "dist" / "dict.tsv"
+    entries_path = tmp_path / "data" / "entries.jsonl"
+    first_artifact, second_artifact = tmp_path / "dist" / "dict.tsv", tmp_path / "dist" / "dict.txt"
     entries = EntryRepository(entries_path)
     entries.replace(
         [
@@ -1047,29 +1083,33 @@ def test_entry_publication_recovers_after_the_first_file_is_replaced(
             )
         ]
     )
-    artifact.parent.mkdir()
-    artifact.write_text("おーるど\tOld\n", encoding="utf-8")
+    first_artifact.parent.mkdir()
+    first_artifact.write_text("おーるど\tOld\n", encoding="utf-8")
+    second_artifact.write_text("old", encoding="utf-8")
     replacement = DictionaryEntry(
         canonical_id="new", reading="にゅー", canonical_name="New", source_urls=[]
     )
-    original = repository._write_text_atomic
+    original = repository._write_bytes_atomic
     failed = False
 
-    def fail_once(path: Path, payload: str) -> None:
+    def fail_once(path: Path, payload: bytes) -> None:
         nonlocal failed
-        if path == artifact and not failed:
+        if path == second_artifact and not failed:
             failed = True
             raise OSError("simulated artifact failure")
         original(path, payload)
 
-    monkeypatch.setattr(repository, "_write_text_atomic", fail_once)
+    monkeypatch.setattr(repository, "_write_bytes_atomic", fail_once)
     with pytest.raises(OSError, match="simulated"):
-        entries.publish([replacement], artifact, "にゅー\tNew\n")
-    monkeypatch.setattr(repository, "_write_text_atomic", original)
+        entries.publish(
+            [replacement], {first_artifact: "にゅー\tNew\n".encode(), second_artifact: b"new"}
+        )
+    monkeypatch.setattr(repository, "_write_bytes_atomic", original)
 
-    entries.recover_publication(artifact)
+    entries.recover_publication([first_artifact, second_artifact])
     assert [entry.canonical_id for entry in entries.all()] == ["new"]
-    assert artifact.read_text("utf-8") == "にゅー\tNew\n"
+    assert first_artifact.read_text("utf-8") == "にゅー\tNew\n"
+    assert second_artifact.read_bytes() == b"new"
 
 
 def test_review_checkpoint_is_idempotent(tmp_path: Path) -> None:
@@ -1147,20 +1187,20 @@ async def test_pipeline_resumes_a_checkpointed_entry_without_researching(
         compiler=DictionaryCompiler(),
         settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
     )
-    original = repository._write_text_atomic
+    original = repository._write_bytes_atomic
     failed = False
 
-    def fail_artifact_once(path: Path, payload: str) -> None:
+    def fail_artifact_once(path: Path, payload: bytes) -> None:
         nonlocal failed
         if path == artifact and not failed:
             failed = True
             raise OSError("simulated artifact failure")
         original(path, payload)
 
-    monkeypatch.setattr(repository, "_write_text_atomic", fail_artifact_once)
+    monkeypatch.setattr(repository, "_write_bytes_atomic", fail_artifact_once)
     with pytest.raises(OSError, match="simulated"):
         await pipeline.run()
-    monkeypatch.setattr(repository, "_write_text_atomic", original)
+    monkeypatch.setattr(repository, "_write_bytes_atomic", original)
 
     assert candidates.all()[0].pending_entry is not None
     assert await pipeline.run() == 0

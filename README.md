@@ -4,23 +4,61 @@
 
 ## アーキテクチャ
 
-```text
-AgencyDiscovery ─┐
-                 ├─ CandidateRepository ─ identity resolution ─ platform metrics
-TwitchDiscovery ─┘                                         │
-      Get Streams → VTuber tag                              ▼
-       (live only)                       Script / threshold / existing-entry filters
-                                                               ▼
-                                                  ReadingResearchAgent
-                                                               ▼
-                                                   VerificationAgent
-                                                               ▼
-                                                   DeterministicValidator
-                                                               ▼
-                                                   DictionaryCompiler → dist TSV
+```mermaid
+flowchart TB
+    cli["CLI: update / discover / process"]
+
+    subgraph discovery["候補の発見: discover"]
+        direction LR
+        agencies["data/agencies.json"] --> agency_source["公式事務所サイト"]
+        agency_source --> agency["AgencyDiscovery"]
+        twitch_api["Twitch Helix: Get Streams<br/>ライブ中かつ VTuber タグ"] --> twitch["TwitchDiscovery"]
+        twitch_checkpoint["Twitch discovery checkpoint"] --> twitch
+    end
+
+    candidates["data/candidates.jsonl<br/>候補・Agent 結果・pending entry"]
+    agency --> candidates
+    twitch --> candidates
+    twitch --> twitch_checkpoint
+    cli --> discovery
+
+    subgraph processing["候補の処理: process"]
+        direction TB
+        recover["公開・レビューのジャーナルを回復"]
+        filters["発見元・既存エントリ・<br/>カタカナ/ラテン名フィルタ"]
+        metrics["YouTube Data API / Twitch Helix<br/>チャンネル・フォロワー統計"]
+        threshold["規模しきい値<br/>事務所候補は免除"]
+        sources["公式プロフィール・プラットフォーム概要を取得<br/>Twitch 発見候補は robots 準拠で検索結果も取得"]
+        research["ReadingResearchAgent<br/>事前取得済みソースだけを調査"]
+        verify["VerificationAgent<br/>同じソースで独立監査"]
+        validate["DeterministicValidator"]
+        pending["pending entry を候補へチェックポイント"]
+        review["レビュー・候補状態を<br/>リプレイ可能なジャーナルで保存"]
+
+        recover --> filters --> metrics --> threshold --> sources --> research --> verify --> validate
+        validate -->|不一致などは最大 3 回再試行| research
+        validate -->|未解決・不採用| review
+        validate -->|採用| pending
+    end
+
+    cli --> processing
+    candidates --> recover
+    entries["data/entries.jsonl<br/>検証済みの正規データ"] --> recover
+    research -. Agent 応答を保存 .-> candidates
+    verify -. Agent 応答を保存 .-> candidates
+    pending --> candidates
+    review --> candidates
+    review --> reviews["data/review_required.jsonl"]
+
+    publish["書込み先行ジャーナルで一括公開"]
+    pending --> publish
+    publish --> entries
+    publish --> tsv["dist/vtuber_dictionary.tsv"]
+    publish --> msime["dist/vtuber_dictionary_msime.txt<br/>Windows Microsoft IME"]
+    publish --> macos["dist/vtuber_dictionary_macos.csv<br/>macOS 日本語入力"]
 ```
 
-`domain.py` は外部サービスから独立したデータ構造です。HTTP API と Agent は protocol/adapter を介し、テストでは fake に置換します。YouTube/Twitch の規模判定は通常の Python コードと公式 API の値だけで行い、LLM には委ねません。
+`update` は `discover` の後に `process` を実行します。`discover` と `process` は個別にも実行でき、GitHub Actions では発見結果をコミットしてから処理するため、中断後も候補を再利用できます。`domain.py` は外部サービスから独立したデータ構造です。HTTP API と Agent は protocol/adapter を介し、テストでは fake に置換します。YouTube/Twitch の規模判定は通常の Python コードと公式 API の値だけで行い、LLM には委ねません。
 
 ## セットアップ
 

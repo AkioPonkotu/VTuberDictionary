@@ -801,6 +801,42 @@ def test_deterministic_validator_and_compiler(tmp_path: Path) -> None:
     assert output.read_text("utf-8") == "ほしまちすいせい\t星街すいせい\n"
 
 
+def test_validator_removes_unicode_whitespace_from_canonical_names() -> None:
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="name")
+    ]
+    parts = NameReadingParts(
+        family_name="雪花",
+        given_name="ラミィ",
+        family_reading="ゆきはな",
+        given_reading="らみぃ",
+    )
+    research = ResearchResult(
+        canonical_name="雪花 ラミィ",
+        reading="ゆきはな らみぃ",
+        name_parts=parts,
+        confidence=1,
+        evidence=evidence,
+        status="resolved",
+    )
+    verification = VerificationResult(
+        verified=True,
+        canonical_name="雪花　ラミィ",
+        reading="ゆきはな らみぃ",
+        name_parts=parts,
+        confidence=1,
+        evidence=evidence,
+    )
+
+    entry, reason = DeterministicValidator().validate(
+        Candidate(display_name="雪花ラミィ"), research, verification, []
+    )
+
+    assert reason is None
+    assert entry is not None
+    assert entry.canonical_name == "雪花ラミィ"
+
+
 def test_platform_exporters_use_the_required_encoding_format_and_csv_escaping() -> None:
     entry = DictionaryEntry(
         canonical_id="quoted",

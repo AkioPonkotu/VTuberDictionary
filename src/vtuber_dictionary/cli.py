@@ -24,7 +24,7 @@ from .ports import ReadingResearcher, Verifier
 from .repository import AgencyRepository, CandidateRepository, EntryRepository, ReviewRepository
 from .settings import Settings
 from .validation import DeterministicValidator
-from .web_sources import OfficialSourcePrefetcher
+from .web_sources import TwitchSearchSourcePrefetcher
 from .workflow import Pipeline
 
 
@@ -89,7 +89,11 @@ async def update(settings: Settings, discovery_sources: set[str] | None = None) 
         validator=DeterministicValidator(),
         compiler=DictionaryCompiler(),
         settings=settings,
-        web_sources=OfficialSourcePrefetcher(),
+        web_sources=TwitchSearchSourcePrefetcher(
+            enabled=settings.twitch_crawler_enabled,
+            max_results=settings.twitch_crawler_max_results,
+            minimum_delay_seconds=settings.twitch_crawler_delay_seconds,
+        ),
     )
     return await pipeline.run()
 

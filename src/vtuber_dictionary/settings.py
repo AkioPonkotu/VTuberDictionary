@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     twitch_discovery_language: str = "ja"
     twitch_discovery_tag: str = "VTuber"
     twitch_discovery_max_pages: int = Field(default=20, ge=1, le=100)
+    twitch_crawler_enabled: bool = True
+    twitch_crawler_max_results: int = Field(default=3, ge=1, le=5)
+    twitch_crawler_delay_seconds: float = Field(default=1.0, ge=0.1, le=60)
     data_dir: Path = Path("data")
     dist_dir: Path = Path("dist")
 

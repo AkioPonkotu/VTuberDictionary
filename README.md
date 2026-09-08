@@ -46,6 +46,7 @@ uv run mypy src
 | `AUDIENCE_THRESHOLD_MODE` | 既定 `any`（YouTube **または** Twitch）。`all` も利用可能 |
 | `REVERIFY_AFTER_DAYS` | 既存エントリを再検証するまでの日数（既定 180） |
 | `TWITCH_DISCOVERY_ENABLED`, `TWITCH_DISCOVERY_LANGUAGE`, `TWITCH_DISCOVERY_TAG`, `TWITCH_DISCOVERY_MAX_PAGES` | Twitch の収集範囲。language を空にすると言語制限なし |
+| `TWITCH_CRAWLER_ENABLED`, `TWITCH_CRAWLER_MAX_RESULTS`, `TWITCH_CRAWLER_DELAY_SECONDS` | Twitch 発見候補だけに使う、API キー不要の Web クローラ（既定は上位 3 件・リクエスト間隔 1 秒） |
 
 `uv sync` は Microsoft Agent Framework の OpenAI provider もインストールします。Agent は
 Pydantic response format だけを指定して実行します。Web Search tool は使用しません。
@@ -96,9 +97,11 @@ dist/vtuber_dictionary.tsv     Distribution artifact
 ## 調査・検証ポリシー
 
 Agent を呼ぶ前に、アプリケーションが候補の公式プロフィール URL と、公式 API から取得済みの
-YouTube/Twitch 概要を取得し、本文を上限付きで Agent に渡します。Agent には Web Search tool
-を渡さないため、検索回数と検索コンテキストのコストは発生しません。公式プロフィールを取得できない
-候補は、その情報だけで解決できなければ `unresolved` となります。
+YouTube/Twitch 概要を取得し、本文を上限付きで Agent に渡します。Twitch の `VTuber` タグから
+発見した候補だけは、DuckDuckGo の非 JavaScript 検索結果を 1 回クロールし、`robots.txt` を尊重して
+上位 URL を最大 3 件取得します。Agent には Web Search tool を渡さないため、OpenAI 側の検索回数と
+検索コンテキストのコストは発生しません。公式プロフィールを取得できない候補は、その情報だけで
+解決できなければ `unresolved` となります。
 
 ReadingResearchAgent は事前取得した公式事務所プロフィール、本人プロフィール、YouTube/Twitch
 概要から読みを調査します。事務所候補では、取得済みの公式プロフィール URL と一致する

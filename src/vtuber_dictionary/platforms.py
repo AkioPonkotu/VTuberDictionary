@@ -105,8 +105,10 @@ class RetryingHttpClient:
         response = await self._request("POST", url, data=data)
         return cast(dict[str, Any], response.json())
 
-    async def get_text(self, url: str) -> str:
-        return (await self._request("GET", url)).text
+    async def get_text(
+        self, url: str, *, headers: dict[str, str] | None = None
+    ) -> str:
+        return (await self._request("GET", url, headers=headers)).text
 
     async def aclose(self) -> None:
         await self.client.aclose()

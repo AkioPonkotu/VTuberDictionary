@@ -31,7 +31,11 @@ from vtuber_dictionary.platforms import (
 from vtuber_dictionary.repository import CandidateRepository, EntryRepository, ReviewRepository
 from vtuber_dictionary.settings import Settings
 from vtuber_dictionary.validation import DeterministicValidator
-from vtuber_dictionary.web_sources import OfficialSourcePrefetcher, visible_text
+from vtuber_dictionary.web_sources import (
+    OfficialSourcePrefetcher,
+    TwitchSearchSourcePrefetcher,
+    visible_text,
+)
 from vtuber_dictionary.workflow import Pipeline
 
 
@@ -446,6 +450,47 @@ async def test_prefetcher_collects_visible_official_and_platform_source_material
     ]
     assert sources[0].content == "公式 タレント 読み: こうしき"
     assert visible_text("<style>x</style><p>表示</p>", 20) == "表示"
+
+
+@pytest.mark.asyncio
+async def test_twitch_prefetcher_crawls_search_results_but_obeys_robots() -> None:
+    class FakeHttp:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def get_text(self, url: str, *, headers: dict[str, str] | None = None) -> str:
+            self.calls.append(url)
+            assert headers and "User-Agent" in headers
+            if url.startswith("https://html.duckduckgo.com/html/"):
+                return """
+                    <a class=\"result__a\" href=\"https://official.example/profile\">公式</a>
+                    <a class=\"result__a\" href=\"https://blocked.example/profile\">除外</a>
+                """
+            if url == "https://official.example/robots.txt":
+                return "User-agent: *\nAllow: /\n"
+            if url == "https://blocked.example/robots.txt":
+                return "User-agent: *\nDisallow: /\n"
+            if url == "https://official.example/profile":
+                return "<h1>配信者の公式サイト</h1><p>読みは はいしんしゃ</p>"
+            raise AssertionError(f"unexpected request: {url}")
+
+    http = FakeHttp()
+    candidate = Candidate(
+        display_name="配信者",
+        twitch_login="streamer",
+        discovery_sources={"twitch_vtuber_tag"},
+    )
+    sources = await TwitchSearchSourcePrefetcher(
+        http=http,  # type: ignore[arg-type]
+        max_results=2,
+        minimum_delay_seconds=0,
+    ).fetch(candidate, AudienceMetrics())
+
+    assert [(source.url, source.source_type) for source in sources] == [
+        ("https://official.example/profile", "other")
+    ]
+    assert "https://blocked.example/profile" not in http.calls
+    assert "https://official.example/robots.txt" in http.calls
 
 
 def test_validator_allows_fetched_agency_profile_without_verification() -> None:

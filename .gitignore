@@ -14,8 +14,10 @@ htmlcov/
 # Only interrupted atomic-write artifacts stay local.
 data/*.tmp
 dist/*.tmp
+data/.dictionary-transaction.json
 
 # OS/editor files
 .DS_Store
 Thumbs.db
 .vscode/
+/data

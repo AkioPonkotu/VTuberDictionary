@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from .domain import Candidate, DictionaryEntry, ResearchResult, VerificationResult
+from .domain import Candidate, DictionaryEntry, ResearchResult, VerificationResult, WebSource
 
 READING_PATTERN = re.compile(r"^[ぁ-ゖゝゞー]+$")
 PRIMARY_SOURCE_TYPES = {
@@ -19,17 +19,51 @@ PRIMARY_SOURCE_TYPES = {
 
 
 class DeterministicValidator:
+    @staticmethod
+    def _same_url(left: str, right: str) -> bool:
+        return left.rstrip("/") == right.rstrip("/")
+
+    def can_skip_verification(
+        self, candidate: Candidate, research: ResearchResult, sources: list[WebSource]
+    ) -> bool:
+        """Allow one-agent acceptance only for an app-fetched agency profile."""
+        if candidate.agency is None or candidate.official_profile_url is None:
+            return False
+        if research.status != "resolved" or not research.canonical_name or not research.reading:
+            return False
+        profile_was_fetched = any(
+            source.source_type == "official_agency_profile"
+            and self._same_url(source.url, candidate.official_profile_url)
+            for source in sources
+        )
+        return profile_was_fetched and any(
+            evidence.source_type == "official_agency_profile"
+            and self._same_url(evidence.url, candidate.official_profile_url)
+            for evidence in research.evidence
+        )
+
     def validate(
         self,
         candidate: Candidate,
         research: ResearchResult,
-        verification: VerificationResult,
+        verification: VerificationResult | None,
         existing: list[DictionaryEntry],
+        sources: list[WebSource] | None = None,
     ) -> tuple[DictionaryEntry | None, str | None]:
-        name = unicodedata.normalize("NFC", verification.canonical_name or "")
-        reading = unicodedata.normalize("NFC", verification.reading or "")
-        if not verification.verified:
-            return None, "verification agent did not verify the result"
+        skipped_verification = verification is None
+        if skipped_verification:
+            if not self.can_skip_verification(candidate, research, sources or []):
+                return None, (
+                    "verification may only be skipped for a fetched official agency profile"
+                )
+            name = unicodedata.normalize("NFC", research.canonical_name or "")
+            reading = unicodedata.normalize("NFC", research.reading or "")
+        else:
+            assert verification is not None
+            if not verification.verified:
+                return None, "verification agent did not verify the result"
+            name = unicodedata.normalize("NFC", verification.canonical_name or "")
+            reading = unicodedata.normalize("NFC", verification.reading or "")
         if not name or not reading:
             return None, "canonical name or reading is missing"
         research_name = unicodedata.normalize("NFC", research.canonical_name or "")
@@ -38,11 +72,11 @@ class DeterministicValidator:
             return None, "research and verification results disagree"
         if not READING_PATTERN.fullmatch(reading):
             return None, "reading must consist of hiragana and prolonged-sound mark"
-        if not verification.evidence:
+        if not skipped_verification and verification is not None and not verification.evidence:
             return None, "verification evidence is missing"
         if not research.evidence:
             return None, "research evidence is missing"
-        evidence = research.evidence + verification.evidence
+        evidence = research.evidence + (verification.evidence if verification is not None else [])
         if not any(item.source_type in PRIMARY_SOURCE_TYPES for item in evidence):
             return None, "no primary official evidence was supplied"
         if any(item.canonical_id == candidate.canonical_id for item in existing):

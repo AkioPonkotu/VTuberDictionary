@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .dictionary import DictionaryCompiler
 from .domain import CandidateStatus, DictionaryEntry, ReviewRecord
 from .filtering import ExistingEntryFilter, ThresholdFilter
-from .ports import PlatformMetadataSource, ReadingResearcher, Verifier
+from .ports import PlatformMetadataSource, ReadingResearcher, Verifier, WebSourcePrefetcher
 from .repository import CandidateRepository, EntryRepository, ReviewRepository
 from .settings import Settings
 from .validation import DeterministicValidator
@@ -24,6 +24,7 @@ class Pipeline:
     validator: DeterministicValidator
     compiler: DictionaryCompiler
     settings: Settings
+    web_sources: WebSourcePrefetcher | None = None
 
     async def run(self) -> int:
         """Return count of accepted additions; compile only after all stages succeed."""
@@ -45,14 +46,21 @@ class Pipeline:
             metrics = await self.platforms.audience_metrics(candidate)
             if candidate.agency is None and not threshold.accepts(metrics):
                 continue
-            research = await self.researcher.research(candidate, metrics)
-            verification = await self.verifier.verify(candidate, research, metrics)
+            sources = await self.web_sources.fetch(candidate, metrics) if self.web_sources else []
+            research = await self.researcher.research(candidate, metrics, sources)
+            verification = (
+                None
+                if self.validator.can_skip_verification(candidate, research, sources)
+                else await self.verifier.verify(candidate, research, metrics, sources)
+            )
             prior = [
                 entry
                 for entry in existing + additions
                 if entry.canonical_id != candidate.canonical_id
             ]
-            entry, reason = self.validator.validate(candidate, research, verification, prior)
+            entry, reason = self.validator.validate(
+                candidate, research, verification, prior, sources
+            )
             if entry is None:
                 candidate.status = CandidateStatus.REVIEW_REQUIRED
                 self.reviews.append(

@@ -5,7 +5,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from .domain import Agency, AudienceMetrics, Candidate, ResearchResult, VerificationResult
+from .domain import (
+    Agency,
+    AudienceMetrics,
+    Candidate,
+    ResearchResult,
+    VerificationResult,
+    WebSource,
+)
 
 
 class AgencyTalentSource(Protocol):
@@ -20,11 +27,21 @@ class PlatformMetadataSource(Protocol):
     async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics: ...
 
 
+class WebSourcePrefetcher(Protocol):
+    async def fetch(self, candidate: Candidate, metrics: AudienceMetrics) -> list[WebSource]: ...
+
+
 class ReadingResearcher(Protocol):
-    async def research(self, candidate: Candidate, metrics: AudienceMetrics) -> ResearchResult: ...
+    async def research(
+        self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+    ) -> ResearchResult: ...
 
 
 class Verifier(Protocol):
     async def verify(
-        self, candidate: Candidate, research: ResearchResult, metrics: AudienceMetrics
+        self,
+        candidate: Candidate,
+        research: ResearchResult,
+        metrics: AudienceMetrics,
+        sources: list[WebSource],
     ) -> VerificationResult: ...

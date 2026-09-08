@@ -18,6 +18,7 @@ from vtuber_dictionary.domain import (
     Evidence,
     ResearchResult,
     VerificationResult,
+    WebSource,
 )
 from vtuber_dictionary.filtering import ExistingEntryFilter, ThresholdFilter
 from vtuber_dictionary.platforms import (
@@ -30,6 +31,7 @@ from vtuber_dictionary.platforms import (
 from vtuber_dictionary.repository import CandidateRepository, EntryRepository, ReviewRepository
 from vtuber_dictionary.settings import Settings
 from vtuber_dictionary.validation import DeterministicValidator
+from vtuber_dictionary.web_sources import OfficialSourcePrefetcher, visible_text
 from vtuber_dictionary.workflow import Pipeline
 
 
@@ -54,9 +56,11 @@ class FakeRunner:
     def __init__(self, responses: list[str]) -> None:
         self.responses = responses
         self.response_models: list[type[object]] = []
+        self.prompts: list[str] = []
 
     async def run_json(self, instructions: str, prompt: str, response_model: type[object]) -> str:
         self.response_models.append(response_model)
+        self.prompts.append(prompt)
         return self.responses.pop(0)
 
 
@@ -405,10 +409,73 @@ async def test_research_and_verification_parse_structured_output() -> None:
         ]
     )
     candidate, metrics = Candidate(display_name="星街すいせい"), AudienceMetrics()
-    research = await ReadingResearchAgent(runner).research(candidate, metrics)
-    verified = await VerificationAgent(runner).verify(candidate, research, metrics)
+    sources = [
+        WebSource(
+            url="https://official.example",
+            source_type="official_profile",
+            content="星街すいせい（ほしまちすいせい）",
+        )
+    ]
+    research = await ReadingResearchAgent(runner).research(candidate, metrics, sources)
+    verified = await VerificationAgent(runner).verify(candidate, research, metrics, sources)
     assert research.status == "resolved" and verified.verified
     assert runner.response_models == [ResearchResult, VerificationResult]
+    assert "prefetched_sources" in runner.prompts[0]
+    assert "https://official.example" in runner.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_prefetcher_collects_visible_official_and_platform_source_material() -> None:
+    class FakeHttp:
+        async def get_text(self, url: str) -> str:
+            assert url == "https://agency.example/talents/a"
+            return "<script>ignore()</script><h1>公式 タレント</h1><p>読み: こうしき</p>"
+
+    candidate = Candidate(
+        display_name="公式タレント",
+        agency="Agency",
+        official_profile_url="https://agency.example/talents/a",
+        youtube_channel_url="https://youtube.com/@official",
+    )
+    sources = await OfficialSourcePrefetcher(http=FakeHttp()).fetch(  # type: ignore[arg-type]
+        candidate, AudienceMetrics(youtube_description="公式チャンネル概要")
+    )
+    assert [(item.url, item.source_type) for item in sources] == [
+        ("https://agency.example/talents/a", "official_agency_profile"),
+        ("https://youtube.com/@official", "youtube_about"),
+    ]
+    assert sources[0].content == "公式 タレント 読み: こうしき"
+    assert visible_text("<style>x</style><p>表示</p>", 20) == "表示"
+
+
+def test_validator_allows_fetched_agency_profile_without_verification() -> None:
+    candidate = Candidate(
+        display_name="星街すいせい",
+        agency="Agency",
+        official_profile_url="https://agency.example/talents/suisei/",
+    )
+    source = WebSource(
+        url="https://agency.example/talents/suisei",
+        source_type="official_agency_profile",
+        content="星街すいせい（ほしまちすいせい）",
+    )
+    research = ResearchResult(
+        canonical_name="星街すいせい",
+        reading="ほしまちすいせい",
+        confidence=1,
+        evidence=[
+            Evidence(
+                url=source.url,
+                source_type="official_agency_profile",
+                claim="読みはほしまちすいせい",
+            )
+        ],
+        status="resolved",
+    )
+    validator = DeterministicValidator()
+    assert validator.can_skip_verification(candidate, research, [source])
+    entry, reason = validator.validate(candidate, research, None, [], [source])
+    assert reason is None and entry is not None
 
 
 def test_deterministic_validator_and_compiler(tmp_path: Path) -> None:
@@ -494,7 +561,9 @@ async def test_pipeline_compiles_verified_agency_candidate_below_threshold(tmp_p
     ]
 
     class Researcher:
-        async def research(self, candidate: Candidate, metrics: AudienceMetrics) -> ResearchResult:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
             return ResearchResult(
                 canonical_name="星街すいせい",
                 reading="ほしまちすいせい",
@@ -505,7 +574,11 @@ async def test_pipeline_compiles_verified_agency_candidate_below_threshold(tmp_p
 
     class Verifier:
         async def verify(
-            self, candidate: Candidate, research: ResearchResult, metrics: AudienceMetrics
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
         ) -> VerificationResult:
             return VerificationResult(
                 verified=True,
@@ -538,17 +611,93 @@ async def test_pipeline_compiles_verified_agency_candidate_below_threshold(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_pipeline_skips_verification_for_prefetched_agency_profile(tmp_path: Path) -> None:
+    profile_url = "https://agency.example/talents/suisei"
+    source = WebSource(
+        url=profile_url,
+        source_type="official_agency_profile",
+        content="星街すいせい（ほしまちすいせい）",
+    )
+
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics(youtube_subscribers=0)
+
+    class Sources:
+        async def fetch(self, candidate: Candidate, metrics: AudienceMetrics) -> list[WebSource]:
+            return [source]
+
+    class Researcher:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            return ResearchResult(
+                canonical_name="星街すいせい",
+                reading="ほしまちすいせい",
+                confidence=1,
+                evidence=[
+                    Evidence(
+                        url=profile_url,
+                        source_type="official_agency_profile",
+                        claim="読みはほしまちすいせい",
+                    )
+                ],
+                status="resolved",
+            )
+
+    class MustNotVerify:
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            raise AssertionError("official agency evidence must skip verification")
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidates.upsert(
+        Candidate(
+            display_name="星街すいせい",
+            agency="Agency",
+            official_profile_url=profile_url,
+            youtube_channel_id="UC123",
+        )
+    )
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=Researcher(),
+        verifier=MustNotVerify(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+        web_sources=Sources(),
+    )
+    assert await pipeline.run() == 1
+
+
+@pytest.mark.asyncio
 async def test_pipeline_creates_empty_artifact_without_accepted_candidates(tmp_path: Path) -> None:
     class Metrics:
         async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
             return AudienceMetrics(youtube_subscribers=0)
 
     class ShouldNotRun:
-        async def research(self, candidate: Candidate, metrics: AudienceMetrics) -> ResearchResult:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
             raise AssertionError("threshold filter should prevent research")
 
         async def verify(
-            self, candidate: Candidate, research: ResearchResult, metrics: AudienceMetrics
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
         ) -> VerificationResult:
             raise AssertionError("threshold filter should prevent verification")
 

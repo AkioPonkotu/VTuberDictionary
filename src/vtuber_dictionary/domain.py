@@ -78,6 +78,14 @@ class Evidence(BaseModel):
     claim: str
 
 
+class WebSource(BaseModel):
+    """A bounded, application-fetched public source supplied to an agent."""
+
+    url: str
+    source_type: str
+    content: str
+
+
 class ResearchResult(BaseModel):
     canonical_name: str | None = None
     reading: str | None = None

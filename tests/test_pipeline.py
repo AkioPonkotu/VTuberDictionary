@@ -94,13 +94,16 @@ class FakeStreams:
 class FakeRunner:
     def __init__(self, responses: list[str]) -> None:
         self.responses = responses
+        self.returned: list[str] = []
         self.response_models: list[type[object]] = []
         self.prompts: list[str] = []
 
     async def run_json(self, instructions: str, prompt: str, response_model: type[object]) -> str:
         self.response_models.append(response_model)
         self.prompts.append(prompt)
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        self.returned.append(response)
+        return response
 
 
 @pytest.mark.asyncio
@@ -569,6 +572,8 @@ async def test_research_and_verification_parse_structured_output() -> None:
     research = await ReadingResearchAgent(runner).research(candidate, metrics, sources)
     verified = await VerificationAgent(runner).verify(candidate, research, metrics, sources)
     assert research.status == "resolved" and verified.verified
+    assert research.raw_json == runner.returned[0]
+    assert verified.raw_json == runner.returned[1]
     assert research.name_parts.family_reading == "ほしまち"
     assert verified.name_parts.given_reading == "すいせい"
     assert runner.response_models == [ResearchResult, VerificationResult]
@@ -864,6 +869,76 @@ def test_validator_rejects_a_missing_family_reading() -> None:
 
     assert entry is None
     assert reason == "family name and reading must both be present or absent"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_persists_agent_raw_json_for_a_reviewed_candidate(tmp_path: Path) -> None:
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="name")
+    ]
+    parts = NameReadingParts(
+        family_name="本阿弥",
+        given_name="あずさ",
+        family_reading="ほんあみ",
+        given_reading="あずさ",
+    )
+
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics()
+
+    class Researcher:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            return ResearchResult(
+                canonical_name="本阿弥あずさ",
+                reading="あずさ",
+                name_parts=parts,
+                confidence=1,
+                evidence=evidence,
+                status="resolved",
+                raw_json='{"agent":"research"}',
+            )
+
+    class Verifier:
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            return VerificationResult(
+                verified=True,
+                canonical_name="本阿弥あずさ",
+                reading="あずさ",
+                name_parts=parts,
+                confidence=1,
+                evidence=evidence,
+                raw_json='{"agent":"verification"}',
+            )
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidates.upsert(Candidate(display_name="本阿弥あずさ", agency="Agency"))
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=Researcher(),
+        verifier=Verifier(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+
+    assert await pipeline.run() == 0
+    stored = candidates.all()[0]
+    assert stored.status == CandidateStatus.REVIEW_REQUIRED
+    assert stored.research_raw_json == '{"agent":"research"}'
+    assert stored.verification_raw_json == '{"agent":"verification"}'
 
 
 @pytest.mark.asyncio

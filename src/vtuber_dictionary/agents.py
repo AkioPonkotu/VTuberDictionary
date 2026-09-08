@@ -130,7 +130,7 @@ class ReadingResearchAgent:
         raw = await self.runner.run_json(
             RESEARCH_INSTRUCTIONS, _candidate_context(candidate, metrics, sources), ResearchResult
         )
-        return ResearchResult.model_validate_json(raw)
+        return ResearchResult.model_validate_json(raw).model_copy(update={"raw_json": raw})
 
 
 class VerificationAgent:
@@ -150,4 +150,4 @@ class VerificationAgent:
             + research.model_dump_json()
         )
         raw = await self.runner.run_json(VERIFY_INSTRUCTIONS, prompt, VerificationResult)
-        return VerificationResult.model_validate_json(raw)
+        return VerificationResult.model_validate_json(raw).model_copy(update={"raw_json": raw})

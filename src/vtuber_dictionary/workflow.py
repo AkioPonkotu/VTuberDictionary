@@ -95,11 +95,15 @@ class Pipeline:
                 continue
             sources = await self.web_sources.fetch(candidate, metrics) if self.web_sources else []
             research = await self.researcher.research(candidate, metrics, sources)
+            candidate.research_raw_json = research.raw_json
+            self.candidates.replace(candidates)
             if research.canonical_name and name_filter.excludes_name(research.canonical_name):
                 candidate.status = CandidateStatus.REJECTED
                 self.candidates.replace(candidates)
                 continue
             verification = await self.verifier.verify(candidate, research, metrics, sources)
+            candidate.verification_raw_json = verification.raw_json
+            self.candidates.replace(candidates)
             if (
                 verification
                 and verification.canonical_name

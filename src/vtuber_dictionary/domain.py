@@ -38,6 +38,10 @@ class Candidate(BaseModel):
     # A durable result checkpoint.  It is cleared only after the entry and TSV
     # have been published together, so a restart never has to call an agent again.
     pending_entry: DictionaryEntry | None = None
+    # The exact structured responses returned by the two agents.  These are
+    # retained even when deterministic validation sends the candidate to review.
+    research_raw_json: str | None = None
+    verification_raw_json: str | None = None
 
     def identity_keys(self) -> set[str]:
         """Keys supported by explicit identity evidence, never a display name."""
@@ -118,6 +122,7 @@ class ResearchResult(BaseModel):
     confidence: float = Field(ge=0, le=1)
     evidence: list[Evidence] = Field(default_factory=list)
     status: Literal["resolved", "unresolved"]
+    raw_json: str | None = Field(default=None, exclude=True)
 
 
 class VerificationResult(BaseModel):
@@ -128,6 +133,7 @@ class VerificationResult(BaseModel):
     confidence: float = Field(ge=0, le=1)
     evidence: list[Evidence] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)
+    raw_json: str | None = Field(default=None, exclude=True)
 
 
 class DictionaryEntry(BaseModel):

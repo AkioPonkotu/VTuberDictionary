@@ -808,6 +808,12 @@ async def test_pipeline_compiles_verified_agency_candidate_below_threshold(tmp_p
     assert (dist_dir / "vtuber_dictionary.tsv").read_text(
         "utf-8"
     ) == "ほしまちすいせい\t星街すいせい\n"
+    assert (dist_dir / "vtuber_dictionary_msime.txt").read_bytes() == (
+        b"\xff\xfe" + "ほしまちすいせい\t星街すいせい\t固有名詞\r\n".encode("utf-16-le")
+    )
+    assert (dist_dir / "vtuber_dictionary_macos.csv").read_text("utf-8") == (
+        "ほしまちすいせい,星街すいせい,proper noun\n"
+    )
 
 
 @pytest.mark.asyncio

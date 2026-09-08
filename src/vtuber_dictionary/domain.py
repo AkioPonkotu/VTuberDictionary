@@ -35,6 +35,9 @@ class Candidate(BaseModel):
     first_discovered_at: datetime = Field(default_factory=now)
     last_seen_at: datetime = Field(default_factory=now)
     status: CandidateStatus = CandidateStatus.DISCOVERED
+    # A durable result checkpoint.  It is cleared only after the entry and TSV
+    # have been published together, so a restart never has to call an agent again.
+    pending_entry: DictionaryEntry | None = None
 
     def identity_keys(self) -> set[str]:
         """Keys supported by explicit identity evidence, never a display name."""

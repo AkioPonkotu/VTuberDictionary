@@ -13,7 +13,7 @@ from .agents import (
     VerificationAgent,
 )
 from .dictionary import DictionaryCompiler
-from .discovery import AgencyDiscovery, TwitchDiscovery, persist_discoveries
+from .discovery import AgencyDiscovery, TwitchDiscovery
 from .platforms import (
     CombinedPlatformClient,
     TwitchHelixClient,
@@ -21,7 +21,13 @@ from .platforms import (
     twitch_app_access_token,
 )
 from .ports import ReadingResearcher, Verifier
-from .repository import AgencyRepository, CandidateRepository, EntryRepository, ReviewRepository
+from .repository import (
+    AgencyRepository,
+    CandidateRepository,
+    EntryRepository,
+    ReviewRepository,
+    TwitchDiscoveryCheckpointRepository,
+)
 from .settings import Settings
 from .validation import DeterministicValidator
 from .web_sources import TwitchSearchSourcePrefetcher
@@ -38,13 +44,11 @@ async def update(settings: Settings, discovery_sources: set[str] | None = None) 
 
     agencies = agency_repo.all()
     if "agency" in enabled_sources:
-        await persist_discoveries(
-            candidate_repo,
-            await AgencyDiscovery(AgencyPageTalentSource()).discover(
-                [agency for agency in agencies if agency.active]
-            ),
+        await AgencyDiscovery(AgencyPageTalentSource()).discover(
+            [agency for agency in agencies if agency.active],
+            candidates_repository=candidate_repo,
+            agencies_repository=agency_repo,
         )
-        agency_repo.replace(agencies)
     twitch: TwitchHelixClient | None = None
     if settings.twitch_client_id and settings.twitch_client_secret:
         token = await twitch_app_access_token(
@@ -54,11 +58,13 @@ async def update(settings: Settings, discovery_sources: set[str] | None = None) 
             settings.twitch_client_id, token, max_pages=settings.twitch_discovery_max_pages
         )
         if "twitch" in enabled_sources and settings.twitch_discovery_enabled:
-            await persist_discoveries(
-                candidate_repo,
-                await TwitchDiscovery(
-                    twitch, settings.twitch_discovery_tag, settings.twitch_discovery_language
-                ).discover(),
+            await TwitchDiscovery(
+                twitch, settings.twitch_discovery_tag, settings.twitch_discovery_language
+            ).discover(
+                candidates_repository=candidate_repo,
+                checkpoint_repository=TwitchDiscoveryCheckpointRepository(
+                    settings.data_dir / "twitch_discovery_checkpoint.json"
+                ),
             )
     youtube = (
         YouTubeDataClient(settings.youtube_api_key.get_secret_value())

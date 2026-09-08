@@ -7,14 +7,19 @@ from typing import cast
 
 from .domain import Agency, Candidate, now
 from .ports import AgencyTalentSource, TwitchStreamSource
-from .repository import CandidateRepository
+from .repository import AgencyRepository, CandidateRepository, TwitchDiscoveryCheckpointRepository
 
 
 class AgencyDiscovery:
     def __init__(self, source: AgencyTalentSource) -> None:
         self.source = source
 
-    async def discover(self, agencies: list[Agency]) -> list[Candidate]:
+    async def discover(
+        self,
+        agencies: list[Agency],
+        candidates_repository: CandidateRepository | None = None,
+        agencies_repository: AgencyRepository | None = None,
+    ) -> list[Candidate]:
         found: list[Candidate] = []
         for agency in agencies:
             candidates = await self.source.list_talents(agency)
@@ -23,7 +28,13 @@ class AgencyDiscovery:
                 candidate.agency = candidate.agency or agency.name
                 candidate.discovery_sources.add("agency")
                 found.append(candidate)
+            # Store every agency's page before moving on.  Re-fetching a page
+            # after a crash is safe because CandidateRepository upserts it.
+            if candidates_repository:
+                candidates_repository.upsert_many(candidates)
             agency.last_checked_at = now()
+            if agencies_repository:
+                agencies_repository.replace(agencies)
         return found
 
     @staticmethod
@@ -51,22 +62,41 @@ class TwitchDiscovery:
     def __init__(self, source: TwitchStreamSource, tag: str, language: str | None) -> None:
         self.source, self.tag, self.language = source, tag.casefold(), language or None
 
-    async def discover(self) -> list[Candidate]:
+    async def discover(
+        self,
+        candidates_repository: CandidateRepository | None = None,
+        checkpoint_repository: TwitchDiscoveryCheckpointRepository | None = None,
+    ) -> list[Candidate]:
         by_user: dict[str, Candidate] = {}
-        async for page in self.source.streams(self.language):
-            for stream in page:
+        cursor = (
+            checkpoint_repository.load(self.tag, self.language) if checkpoint_repository else None
+        )
+        async for page in self.source.stream_pages(self.language, cursor):
+            discovered_on_page: list[Candidate] = []
+            for stream in page.streams:
                 tags = [str(item).casefold() for item in cast(list[object], stream.get("tags", []))]
                 user_id = str(stream.get("user_id", ""))
                 if self.tag not in tags or not user_id:
                     continue
                 login = str(stream.get("user_login", "")) or None
-                by_user[user_id] = Candidate(
+                candidate = Candidate(
                     display_name=str(stream.get("user_name", login or user_id)),
                     twitch_user_id=user_id,
                     twitch_login=login,
                     twitch_url=f"https://www.twitch.tv/{login}" if login else None,
                     discovery_sources={"twitch_vtuber_tag"},
                 )
+                by_user[user_id] = candidate
+                discovered_on_page.append(candidate)
+            # The candidate page is durable before its continuation token.  A
+            # crash can at most replay this page, never skip it.
+            if candidates_repository:
+                candidates_repository.upsert_many(discovered_on_page)
+            if checkpoint_repository:
+                if page.next_cursor:
+                    checkpoint_repository.save(self.tag, self.language, page.next_cursor)
+                else:
+                    checkpoint_repository.clear()
         return list(by_user.values())
 
 

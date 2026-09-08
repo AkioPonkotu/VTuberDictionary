@@ -12,12 +12,14 @@ htmlcov/
 
 # Versioned canonical data and distributable dictionaries are intentionally committed.
 # Only interrupted atomic-write artifacts stay local.
+/data/*
+!data/twitch_discovery_checkpoint.json
 data/*.tmp
 dist/*.tmp
 data/.dictionary-transaction.json
+data/.review-transaction.json
 
 # OS/editor files
 .DS_Store
 Thumbs.db
 .vscode/
-/data

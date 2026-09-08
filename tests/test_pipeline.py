@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from vtuber_dictionary import repository
 from vtuber_dictionary.agency_source import AgencyPageTalentSource
 from vtuber_dictionary.agents import ReadingResearchAgent, VerificationAgent
 from vtuber_dictionary.dictionary import DictionaryCompiler
@@ -14,9 +15,11 @@ from vtuber_dictionary.domain import (
     Agency,
     AudienceMetrics,
     Candidate,
+    CandidateStatus,
     DictionaryEntry,
     Evidence,
     ResearchResult,
+    ReviewRecord,
     VerificationResult,
     WebSource,
 )
@@ -28,7 +31,13 @@ from vtuber_dictionary.platforms import (
     TwitchHelixClient,
     YouTubeDataClient,
 )
-from vtuber_dictionary.repository import CandidateRepository, EntryRepository, ReviewRepository
+from vtuber_dictionary.ports import TwitchStreamPage
+from vtuber_dictionary.repository import (
+    CandidateRepository,
+    EntryRepository,
+    ReviewRepository,
+    TwitchDiscoveryCheckpointRepository,
+)
 from vtuber_dictionary.settings import Settings
 from vtuber_dictionary.validation import DeterministicValidator
 from vtuber_dictionary.web_sources import (
@@ -45,13 +54,24 @@ class FakeAgencySource:
 
 
 class FakeStreams:
-    def streams(self, language: str | None) -> AsyncIterator[list[dict[str, object]]]:
-        async def pages() -> AsyncIterator[list[dict[str, object]]]:
+    def stream_pages(
+        self, language: str | None, cursor: str | None = None
+    ) -> AsyncIterator[TwitchStreamPage]:
+        async def pages() -> AsyncIterator[TwitchStreamPage]:
             assert language == "ja"
-            yield [
-                {"user_id": "1", "user_login": "one", "user_name": "One", "tags": ["vTuBeR"]},
-                {"user_id": "2", "user_login": "two", "user_name": "Two", "tags": ["gaming"]},
-            ]
+            assert cursor is None
+            yield TwitchStreamPage(
+                streams=[
+                    {
+                        "user_id": "1",
+                        "user_login": "one",
+                        "user_name": "One",
+                        "tags": ["vTuBeR"],
+                    },
+                    {"user_id": "2", "user_login": "two", "user_name": "Two", "tags": ["gaming"]},
+                ],
+                next_cursor=None,
+            )
 
         return pages()
 
@@ -762,3 +782,194 @@ async def test_pipeline_creates_empty_artifact_without_accepted_candidates(tmp_p
     )
     assert await pipeline.run() == 0
     assert (dist_dir / "vtuber_dictionary.tsv").read_bytes() == b""
+
+
+def test_entry_publication_recovers_after_the_first_file_is_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entries_path, artifact = tmp_path / "data" / "entries.jsonl", tmp_path / "dist" / "dict.tsv"
+    entries = EntryRepository(entries_path)
+    entries.replace(
+        [
+            DictionaryEntry(
+                canonical_id="old", reading="おーるど", canonical_name="Old", source_urls=[]
+            )
+        ]
+    )
+    artifact.parent.mkdir()
+    artifact.write_text("おーるど\tOld\n", encoding="utf-8")
+    replacement = DictionaryEntry(
+        canonical_id="new", reading="にゅー", canonical_name="New", source_urls=[]
+    )
+    original = repository._write_text_atomic
+    failed = False
+
+    def fail_once(path: Path, payload: str) -> None:
+        nonlocal failed
+        if path == artifact and not failed:
+            failed = True
+            raise OSError("simulated artifact failure")
+        original(path, payload)
+
+    monkeypatch.setattr(repository, "_write_text_atomic", fail_once)
+    with pytest.raises(OSError, match="simulated"):
+        entries.publish([replacement], artifact, "にゅー\tNew\n")
+    monkeypatch.setattr(repository, "_write_text_atomic", original)
+
+    entries.recover_publication(artifact)
+    assert [entry.canonical_id for entry in entries.all()] == ["new"]
+    assert artifact.read_text("utf-8") == "にゅー\tNew\n"
+
+
+def test_review_checkpoint_is_idempotent(tmp_path: Path) -> None:
+    candidates = CandidateRepository(tmp_path / "data" / "candidates.jsonl")
+    candidate = Candidate(display_name="ambiguous", youtube_channel_id="UC123")
+    candidate.status = CandidateStatus.REVIEW_REQUIRED
+    candidates.replace([candidate])
+    reviews = ReviewRepository(tmp_path / "data" / "review_required.jsonl")
+    record = ReviewRecord(
+        canonical_id=candidate.canonical_id, reason="ambiguous", candidate=candidate
+    )
+
+    reviews.checkpoint_review(candidates, [candidate], record)
+    reviews.checkpoint_review(candidates, [candidate], record)
+
+    assert [item.canonical_id for item in reviews.all()] == [candidate.canonical_id]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_resumes_a_checkpointed_entry_without_researching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics(youtube_subscribers=10_000)
+
+    calls = 0
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="reading")
+    ]
+
+    class Researcher:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            nonlocal calls
+            calls += 1
+            return ResearchResult(
+                canonical_name="再開タレント",
+                reading="さいかいたれんと",
+                confidence=1,
+                evidence=evidence,
+                status="resolved",
+            )
+
+    class Verifier:
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            return VerificationResult(
+                verified=True,
+                canonical_name=research.canonical_name,
+                reading=research.reading,
+                confidence=1,
+                evidence=evidence,
+            )
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidates.upsert(Candidate(display_name="再開タレント", youtube_channel_id="UC123"))
+    entries = EntryRepository(data_dir / "entries.jsonl")
+    artifact = dist_dir / "vtuber_dictionary.tsv"
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=entries,
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=Researcher(),
+        verifier=Verifier(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+    original = repository._write_text_atomic
+    failed = False
+
+    def fail_artifact_once(path: Path, payload: str) -> None:
+        nonlocal failed
+        if path == artifact and not failed:
+            failed = True
+            raise OSError("simulated artifact failure")
+        original(path, payload)
+
+    monkeypatch.setattr(repository, "_write_text_atomic", fail_artifact_once)
+    with pytest.raises(OSError, match="simulated"):
+        await pipeline.run()
+    monkeypatch.setattr(repository, "_write_text_atomic", original)
+
+    assert candidates.all()[0].pending_entry is not None
+    assert await pipeline.run() == 0
+    assert calls == 1
+    assert candidates.all()[0].status == CandidateStatus.VERIFIED
+    assert artifact.read_text("utf-8") == "さいかいたれんと\t再開タレント\n"
+
+
+@pytest.mark.asyncio
+async def test_twitch_discovery_resumes_from_a_saved_cursor(tmp_path: Path) -> None:
+    class ResumableStreams:
+        def __init__(self) -> None:
+            self.cursors: list[str | None] = []
+            self.fail_first_run = True
+
+        def stream_pages(
+            self, language: str | None, cursor: str | None = None
+        ) -> AsyncIterator[TwitchStreamPage]:
+            async def pages() -> AsyncIterator[TwitchStreamPage]:
+                self.cursors.append(cursor)
+                if cursor is None:
+                    yield TwitchStreamPage(
+                        streams=[
+                            {
+                                "user_id": "one",
+                                "user_login": "one",
+                                "user_name": "One",
+                                "tags": ["VTuber"],
+                            }
+                        ],
+                        next_cursor="next-page",
+                    )
+                    if self.fail_first_run:
+                        raise OSError("network failure")
+                if cursor == "next-page":
+                    yield TwitchStreamPage(
+                        streams=[
+                            {
+                                "user_id": "two",
+                                "user_login": "two",
+                                "user_name": "Two",
+                                "tags": ["VTuber"],
+                            }
+                        ],
+                        next_cursor=None,
+                    )
+
+            return pages()
+
+    source = ResumableStreams()
+    candidates = CandidateRepository(tmp_path / "data" / "candidates.jsonl")
+    checkpoint = TwitchDiscoveryCheckpointRepository(
+        tmp_path / "data" / "twitch_discovery_checkpoint.json"
+    )
+    discovery = TwitchDiscovery(source, "VTuber", "ja")
+    with pytest.raises(OSError, match="network failure"):
+        await discovery.discover(candidates, checkpoint)
+
+    source.fail_first_run = False
+    await discovery.discover(candidates, checkpoint)
+    assert source.cursors == [None, "next-page"]
+    assert {candidate.twitch_user_id for candidate in candidates.all()} == {"one", "two"}
+    assert not checkpoint.path.exists()

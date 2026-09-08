@@ -20,6 +20,10 @@ jobs:
     environment: dictionary-update
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A recovery run must be able to find the last commit that changed
+          # the artifact, even when this run only checkpoints discovery state.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.11.2"
@@ -44,15 +48,6 @@ jobs:
           TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
           TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
         run: uv run vtuber-dictionary update --source agency
-      - name: Detect dictionary changes
-        id: dictionary
-        shell: bash
-        run: |
-          if [ -n "$(git status --porcelain -- dist/vtuber_dictionary.tsv)" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
       - name: Commit changed canonical data and artifact
         id: commit
         shell: bash
@@ -67,15 +62,25 @@ jobs:
           git commit -m "chore: update VTuber dictionary from agencies"
           git push
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Publish changed IME dictionary as a GitHub Release
-        if: steps.dictionary.outputs.changed == 'true'
+      - name: Publish the latest committed IME dictionary as a GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
         shell: bash
         run: |
-          tag="dictionary-$(date -u '+%Y%m%d-%H%M%S')-${GITHUB_RUN_ID}"
-          gh release create "$tag" dist/vtuber_dictionary.tsv \
-            --target "$COMMIT_SHA" \
-            --title "VTuber IME dictionary ${tag#dictionary-}" \
-            --notes "Automated dictionary update from agency discovery."
+          artifact_sha="$(git log -1 --format=%H -- dist/vtuber_dictionary.tsv)"
+          test -n "$artifact_sha"
+          tag="dictionary-${artifact_sha}"
+          asset="$(mktemp)"
+          trap 'rm -f "$asset"' EXIT
+          git show "${artifact_sha}:dist/vtuber_dictionary.tsv" > "$asset"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --draft \
+              --target "$artifact_sha" \
+              --title "VTuber IME dictionary ${artifact_sha}" \
+              --notes "Automated dictionary update from agency discovery."
+          fi
+          if ! gh release view "$tag" --json assets --jq '.assets[].name' | grep -Fx 'vtuber_dictionary.tsv'; then
+            gh release upload "$tag" "${asset}#vtuber_dictionary.tsv"
+          fi
+          gh release edit "$tag" --draft=false

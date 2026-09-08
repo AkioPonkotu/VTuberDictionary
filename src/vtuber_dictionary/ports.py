@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Protocol
 
 from .domain import (
@@ -19,8 +20,16 @@ class AgencyTalentSource(Protocol):
     async def list_talents(self, agency: Agency) -> list[Candidate]: ...
 
 
+@dataclass(frozen=True)
+class TwitchStreamPage:
+    streams: list[dict[str, object]]
+    next_cursor: str | None
+
+
 class TwitchStreamSource(Protocol):
-    def streams(self, language: str | None) -> AsyncIterator[list[dict[str, object]]]: ...
+    def stream_pages(
+        self, language: str | None, cursor: str | None = None
+    ) -> AsyncIterator[TwitchStreamPage]: ...
 
 
 class PlatformMetadataSource(Protocol):

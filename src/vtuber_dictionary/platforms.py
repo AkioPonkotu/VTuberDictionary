@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .domain import AudienceMetrics, Candidate
+from .ports import TwitchStreamPage
 
 LOG = logging.getLogger(__name__)
 TWITCH_LOGIN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_]{3,24}$", re.IGNORECASE)
@@ -125,8 +126,9 @@ class TwitchHelixClient:
         self.headers = {"Client-Id": client_id, "Authorization": f"Bearer {access_token}"}
         self.http, self.max_pages = http or RetryingHttpClient(), max_pages
 
-    async def streams(self, language: str | None) -> AsyncIterator[list[dict[str, object]]]:
-        cursor: str | None = None
+    async def stream_pages(
+        self, language: str | None, cursor: str | None = None
+    ) -> AsyncIterator[TwitchStreamPage]:
         for _ in range(self.max_pages):
             params = {"first": "100"}
             if language:
@@ -136,8 +138,12 @@ class TwitchHelixClient:
             payload = await self.http.get_json(
                 "https://api.twitch.tv/helix/streams", params=params, headers=self.headers
             )
-            yield list(payload.get("data", []))
-            cursor = payload.get("pagination", {}).get("cursor")
+            next_cursor = payload.get("pagination", {}).get("cursor")
+            yield TwitchStreamPage(
+                streams=list(payload.get("data", [])),
+                next_cursor=str(next_cursor) if next_cursor else None,
+            )
+            cursor = str(next_cursor) if next_cursor else None
             if not cursor:
                 return
 

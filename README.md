@@ -89,8 +89,14 @@ data/agencies.json             Versioned agency registry
 data/candidates.jsonl          Candidate identity cache (execution state)
 data/entries.jsonl             Verified canonical data
 data/review_required.jsonl     Rejected/ambiguous cases and reasons
+data/twitch_discovery_checkpoint.json  Twitch page cursor while a scan is incomplete
 dist/vtuber_dictionary.tsv     Distribution artifact
 ```
+
+候補ごとに、Agent の確定結果は先に `candidates.jsonl` へチェックポイントされます。`entries.jsonl` と TSV の
+更新は書込み先行ジャーナルで保護され、途中停止した場合は次回起動時に同じ確定内容を両方へ再適用します。
+レビュー状態とレビュー記録も同じ方式で回復するため、再実行で同じレビュー行を追加しません。Twitch は候補ページを
+保存してから次ページのカーソルを保存するので、失敗時は最大でも直前のページを安全に再取得します。
 
 出力の各行は `reading<TAB>canonical_name` です。例: `ほしまちすいせい<TAB>星街すいせい`。
 

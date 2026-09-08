@@ -175,6 +175,8 @@ class AgencyPageTalentSource:
 
     @staticmethod
     def _matches_profile(agency: Agency, profile: str) -> bool:
+        if any(ord(character) < 32 or ord(character) == 127 for character in profile):
+            return False
         if urlparse(profile).netloc.casefold() != urlparse(agency.official_url).netloc.casefold():
             return False
         if agency.profile_url_pattern is None:

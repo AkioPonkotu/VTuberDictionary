@@ -148,6 +148,19 @@ async def test_agency_page_source_extracts_official_profile_platform_links() -> 
     assert (candidate.youtube_channel_id, candidate.twitch_login) == ("UC123", "example")
 
 
+def test_agency_page_source_rejects_profile_links_with_control_characters() -> None:
+    agency = Agency(
+        name="Agency",
+        official_url="https://agency.example",
+        talent_list_url="https://agency.example/talents",
+        profile_url_pattern=r"^/talents/[^/]+$",
+    )
+
+    assert not AgencyPageTalentSource._matches_profile(
+        agency, "https://agency.example/talents/invalid\x00"
+    )
+
+
 @pytest.mark.asyncio
 async def test_agency_page_source_uses_image_alt_text_for_profile_name() -> None:
     class FakeHttp:

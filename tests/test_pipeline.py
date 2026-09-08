@@ -23,7 +23,11 @@ from vtuber_dictionary.domain import (
     VerificationResult,
     WebSource,
 )
-from vtuber_dictionary.filtering import ExistingEntryFilter, ThresholdFilter
+from vtuber_dictionary.filtering import (
+    ExistingEntryFilter,
+    KatakanaOrLatinNameFilter,
+    ThresholdFilter,
+)
 from vtuber_dictionary.platforms import (
     AuthenticationError,
     CombinedPlatformClient,
@@ -291,7 +295,8 @@ async def test_youtube_client_strips_query_from_official_handle() -> None:
 
     http = FakeHttp()
     candidate = Candidate(
-        display_name="candidate", youtube_channel_url="https://youtube.com/@candidate?sub_confirmation=1"
+        display_name="candidate",
+        youtube_channel_url="https://youtube.com/@candidate?sub_confirmation=1",
     )
     await YouTubeDataClient("key", http=http).audience_metrics(candidate)  # type: ignore[arg-type]
     assert http.params is not None and http.params["forHandle"] == "candidate"
@@ -388,6 +393,21 @@ def test_threshold_filter_supports_youtube_twitch_and_or() -> None:
     assert filter_.accepts(AudienceMetrics(twitch_followers=5_000))
     assert filter_.accepts(AudienceMetrics(youtube_subscribers=1, twitch_followers=5_000))
     assert not filter_.accepts(AudienceMetrics(youtube_subscribers=9_999, twitch_followers=4_999))
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    ["アルス・アルマル", "Gawr Gura", "Ａｚｒｉ", "クレイジー・オリー Kureiji Ollie"],
+)
+def test_katakana_or_latin_name_filter_excludes_non_japanese_names(display_name: str) -> None:
+    assert KatakanaOrLatinNameFilter().excludes(Candidate(display_name=display_name))
+
+
+@pytest.mark.parametrize("display_name", ["星街すいせい", "ときのそら Tokino Sora", "友人A"])
+def test_katakana_or_latin_name_filter_keeps_names_with_japanese_characters(
+    display_name: str,
+) -> None:
+    assert not KatakanaOrLatinNameFilter().excludes(Candidate(display_name=display_name))
 
 
 def test_existing_entry_filter_uses_canonical_id_and_reverify_window() -> None:
@@ -781,6 +801,103 @@ async def test_pipeline_creates_empty_artifact_without_accepted_candidates(tmp_p
         settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
     )
     assert await pipeline.run() == 0
+    assert (dist_dir / "vtuber_dictionary.tsv").read_bytes() == b""
+
+
+@pytest.mark.asyncio
+async def test_pipeline_rejects_katakana_or_latin_candidates_before_external_calls(
+    tmp_path: Path,
+) -> None:
+    class MustNotRun:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            raise AssertionError("script filter should prevent platform calls")
+
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            raise AssertionError("script filter should prevent research")
+
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            raise AssertionError("script filter should prevent verification")
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidate = candidates.upsert(Candidate(display_name="Gawr Gura", youtube_channel_id="UC123"))
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=MustNotRun(),
+        researcher=MustNotRun(),
+        verifier=MustNotRun(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+
+    assert await pipeline.run() == 0
+    assert candidates.all()[0].canonical_id == candidate.canonical_id
+    assert candidates.all()[0].status == CandidateStatus.REJECTED
+    assert (dist_dir / "vtuber_dictionary.tsv").read_bytes() == b""
+
+
+@pytest.mark.asyncio
+async def test_pipeline_removes_previously_published_katakana_or_latin_candidate(
+    tmp_path: Path,
+) -> None:
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidate = candidates.upsert(Candidate(display_name="アルス・アルマル"))
+    entries = EntryRepository(data_dir / "entries.jsonl")
+    entries.replace(
+        [
+            DictionaryEntry(
+                canonical_id=candidate.canonical_id,
+                reading="あるすあるまる",
+                canonical_name="アルス・アルマル",
+                source_urls=[],
+            )
+        ]
+    )
+
+    class MustNotRun:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            raise AssertionError("script filter should prevent platform calls")
+
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            raise AssertionError("script filter should prevent research")
+
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            raise AssertionError("script filter should prevent verification")
+
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=entries,
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=MustNotRun(),
+        researcher=MustNotRun(),
+        verifier=MustNotRun(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+
+    assert await pipeline.run() == 0
+    assert entries.all() == []
     assert (dist_dir / "vtuber_dictionary.tsv").read_bytes() == b""
 
 

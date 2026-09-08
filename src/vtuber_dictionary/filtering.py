@@ -3,8 +3,28 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from unicodedata import name, normalize
 
 from .domain import AudienceMetrics, Candidate, DictionaryEntry
+
+
+class KatakanaOrLatinNameFilter:
+    """Reject names whose meaningful characters are only Katakana or Latin."""
+
+    def excludes(self, candidate: Candidate) -> bool:
+        characters = [
+            character
+            for character in normalize("NFKC", candidate.display_name)
+            if character.isalpha()
+        ]
+        return bool(characters) and all(
+            self._is_katakana_or_latin(character) for character in characters
+        )
+
+    @staticmethod
+    def _is_katakana_or_latin(character: str) -> bool:
+        unicode_name = name(character, "")
+        return "KATAKANA" in unicode_name or "LATIN" in unicode_name
 
 
 class ThresholdFilter:

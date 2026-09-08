@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .dictionary import DictionaryCompiler
 from .domain import CandidateStatus, DictionaryEntry, ReviewRecord
-from .filtering import ExistingEntryFilter, ThresholdFilter
+from .filtering import ExistingEntryFilter, KatakanaOrLatinNameFilter, ThresholdFilter
 from .ports import PlatformMetadataSource, ReadingResearcher, Verifier, WebSourcePrefetcher
 from .repository import CandidateRepository, EntryRepository, ReviewRepository
 from .settings import Settings
@@ -33,13 +33,33 @@ class Pipeline:
         self.entries.recover_publication(artifact)
         self.reviews.recover_checkpoint(self.candidates)
         existing = self.entries.all()
+        candidates = self.candidates.all()
+        excluded_candidates = KatakanaOrLatinNameFilter()
+        excluded_ids = {
+            candidate.canonical_id
+            for candidate in candidates
+            if excluded_candidates.excludes(candidate)
+        }
+        if excluded_ids:
+            for candidate in candidates:
+                if candidate.canonical_id in excluded_ids:
+                    candidate.status = CandidateStatus.REJECTED
+                    candidate.pending_entry = None
+            self.candidates.replace(candidates)
+            retained_entries = [
+                entry for entry in existing if entry.canonical_id not in excluded_ids
+            ]
+            if len(retained_entries) != len(existing):
+                self.entries.publish(
+                    retained_entries, artifact, self.compiler.render(retained_entries)
+                )
+                existing = retained_entries
         existing_filter = ExistingEntryFilter(existing, self.settings.reverify_after_days)
         threshold = ThresholdFilter(
             self.settings.youtube_min_subscribers,
             self.settings.twitch_min_followers,
             self.settings.audience_threshold_mode,
         )
-        candidates = self.candidates.all()
         additions = 0
         for candidate in candidates:
             # Validation completed before a previous interruption.  Publish the
@@ -50,18 +70,16 @@ class Pipeline:
                 }
                 self._publish_entry(existing, candidate.pending_entry, artifact)
                 existing = self.entries.all()
-                existing_filter = ExistingEntryFilter(
-                    existing, self.settings.reverify_after_days
-                )
+                existing_filter = ExistingEntryFilter(existing, self.settings.reverify_after_days)
                 candidate.pending_entry = None
                 candidate.status = CandidateStatus.VERIFIED
                 self.candidates.replace(candidates)
                 additions += int(was_new)
                 continue
-            if (
-                candidate.status == CandidateStatus.REVIEW_REQUIRED
-                or not existing_filter.needs_research(candidate)
-            ):
+            if candidate.status in {
+                CandidateStatus.REJECTED,
+                CandidateStatus.REVIEW_REQUIRED,
+            } or not existing_filter.needs_research(candidate):
                 continue
             metrics = await self.platforms.audience_metrics(candidate)
             if candidate.agency is None and not threshold.accepts(metrics):

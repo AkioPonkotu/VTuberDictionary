@@ -2,7 +2,7 @@ name: Update dictionary from Twitch
 
 on:
   schedule:
-    # Every four hours at :23 UTC, avoiding the start-of-hour schedule peak.
+    # Every four hours at :23 UTC (00:23, 04:23, 08:23, 12:23, 16:23, 20:23 JST).
     - cron: "23 */4 * * *"
   workflow_dispatch:
 
@@ -12,6 +12,8 @@ permissions:
 # The Twitch and agency workflows both update the same versioned state.
 concurrency:
   group: dictionary-update
+  # Preserve every discovery checkpoint rather than interrupting an active run.
+  cancel-in-progress: false
   queue: max
 
 jobs:
@@ -28,6 +30,20 @@ jobs:
         with:
           version: "0.11.2"
           enable-cache: true
+      - name: Verify required workflow configuration
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+        shell: bash
+        run: |
+          for name in OPENAI_API_KEY OPENAI_MODEL TWITCH_CLIENT_ID TWITCH_CLIENT_SECRET; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing GitHub Actions configuration::$name is required"
+              exit 1
+            fi
+          done
       - run: uv sync --all-groups --locked
       - run: uv run pytest
       - run: uv run ruff check .

@@ -88,6 +88,12 @@ uv run vtuber-dictionary process                   # 永続化済み候補を調
 
 `update` は従来どおり両方を順に実行します。GitHub Actions の定期更新では `discover` の結果を先にコミットしてから `process` を実行するため、後者の外部 API または Agent 呼び出しが失敗しても、次回実行は発見済み候補から再開します。
 
+### Twitch の定期更新（GitHub Actions）
+
+`.github/workflows/update-twitch.yml` は UTC の毎時 `:23`、4時間おき（JST では 00:23、04:23、08:23、12:23、16:23、20:23）に実行されます。手動実行も Actions 画面の **Update dictionary from Twitch** から可能です。事務所更新と同じキューを共有するため、同時に辞書データを更新しません。
+
+有効化前に、リポジトリの Actions secrets に `TWITCH_CLIENT_ID`、`TWITCH_CLIENT_SECRET`、`OPENAI_API_KEY` を、Actions variables に `OPENAI_MODEL` を設定してください。`YOUTUBE_API_KEY` は任意です。ワークフローは候補・辞書・配布成果物をコミットし、Release を公開するため、Actions の `GITHUB_TOKEN` に **Contents: read and write** を許可し、ブランチ保護を使用する場合は GitHub Actions の push を許可してください。必須設定が不足している場合は、候補収集を行わず明示的に失敗します。
+
 OpenAI の認証情報がない場合も、閾値に達した候補が現れるまで候補収集は実行できます。その候補を調査・採用する段階で停止するため、未検証の情報が辞書へ入ることはありません。
 
 実行中の永続データは次のとおりです。

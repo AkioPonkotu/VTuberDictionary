@@ -942,6 +942,88 @@ async def test_pipeline_persists_agent_raw_json_for_a_reviewed_candidate(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_pipeline_researches_after_verification_rejection(tmp_path: Path) -> None:
+    evidence = [
+        Evidence(url="https://official.example", source_type="official_profile", claim="name")
+    ]
+    calls: list[str | None] = []
+
+    class Metrics:
+        async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+            return AudienceMetrics()
+
+    class Researcher:
+        async def research(
+            self, candidate: Candidate, metrics: AudienceMetrics, sources: list[WebSource]
+        ) -> ResearchResult:
+            calls.append(candidate.retry_reason)
+            return ResearchResult(
+                canonical_name="星街すいせい",
+                reading="ほしまちすいせい",
+                name_parts=NameReadingParts(
+                    family_name="星街",
+                    given_name="すいせい",
+                    family_reading="ほしまち",
+                    given_reading="すいせい",
+                ),
+                confidence=1,
+                evidence=evidence,
+                status="resolved",
+                raw_json=f'{{"research_attempt":{len(calls)}}}',
+            )
+
+    class Verifier:
+        async def verify(
+            self,
+            candidate: Candidate,
+            research: ResearchResult,
+            metrics: AudienceMetrics,
+            sources: list[WebSource],
+        ) -> VerificationResult:
+            attempt = len(calls)
+            return VerificationResult(
+                verified=attempt == 3,
+                canonical_name=research.canonical_name,
+                reading=research.reading,
+                name_parts=research.name_parts,
+                confidence=1,
+                evidence=evidence,
+                issues=[] if attempt == 3 else ["confirm the split reading"],
+                raw_json=f'{{"verification_attempt":{attempt}}}',
+            )
+
+    data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
+    candidates = CandidateRepository(data_dir / "candidates.jsonl")
+    candidates.upsert(Candidate(display_name="星街すいせい", agency="Agency"))
+    pipeline = Pipeline(
+        candidates=candidates,
+        entries=EntryRepository(data_dir / "entries.jsonl"),
+        reviews=ReviewRepository(data_dir / "review_required.jsonl"),
+        platforms=Metrics(),
+        researcher=Researcher(),
+        verifier=Verifier(),
+        validator=DeterministicValidator(),
+        compiler=DictionaryCompiler(),
+        settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
+    )
+
+    assert await pipeline.run() == 1
+    stored = candidates.all()[0]
+    assert calls == [
+        None,
+        "verification rejected: confirm the split reading",
+        "verification rejected: confirm the split reading",
+    ]
+    assert stored.status == CandidateStatus.VERIFIED
+    assert stored.research_attempts == 3
+    assert [attempt.failure_reason for attempt in stored.agent_attempts] == [
+        "verification rejected: confirm the split reading",
+        "verification rejected: confirm the split reading",
+        None,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_compiles_verified_agency_candidate_below_threshold(tmp_path: Path) -> None:
     class Metrics:
         async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:

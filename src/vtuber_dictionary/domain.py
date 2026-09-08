@@ -21,6 +21,15 @@ class CandidateStatus(StrEnum):
     VERIFIED = "verified"
 
 
+class AgentAttempt(BaseModel):
+    """Durable record of one research/verification attempt for a candidate."""
+
+    number: int
+    research_raw_json: str | None = None
+    verification_raw_json: str | None = None
+    failure_reason: str | None = None
+
+
 class Candidate(BaseModel):
     canonical_id: str = Field(default_factory=lambda: str(uuid4()))
     display_name: str
@@ -42,6 +51,9 @@ class Candidate(BaseModel):
     # retained even when deterministic validation sends the candidate to review.
     research_raw_json: str | None = None
     verification_raw_json: str | None = None
+    research_attempts: int = 0
+    retry_reason: str | None = None
+    agent_attempts: list[AgentAttempt] = Field(default_factory=list)
 
     def identity_keys(self) -> set[str]:
         """Keys supported by explicit identity evidence, never a display name."""

@@ -46,7 +46,9 @@ class MicrosoftImeExporter:
         entry_list = _sorted(entries)
         for entry in entry_list:
             if any(separator in entry.reading for separator in ("\t", "\r", "\n")):
-                raise ValueError(f"Microsoft IME reading contains a field separator: {entry.reading!r}")
+                raise ValueError(
+                    f"Microsoft IME reading contains a field separator: {entry.reading!r}"
+                )
             if any(separator in entry.canonical_name for separator in ("\t", "\r", "\n")):
                 raise ValueError(
                     f"Microsoft IME word contains a field separator: {entry.canonical_name!r}"

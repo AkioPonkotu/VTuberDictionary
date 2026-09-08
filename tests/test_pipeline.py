@@ -613,7 +613,7 @@ async def test_twitch_prefetcher_crawls_search_results_but_obeys_robots() -> Non
     assert "https://official.example/robots.txt" in http.calls
 
 
-def test_validator_allows_fetched_agency_profile_without_verification() -> None:
+def test_validator_requires_verification_for_fetched_agency_profile() -> None:
     candidate = Candidate(
         display_name="星街すいせい",
         agency="Agency",
@@ -638,8 +638,23 @@ def test_validator_allows_fetched_agency_profile_without_verification() -> None:
         status="resolved",
     )
     validator = DeterministicValidator()
-    assert validator.can_skip_verification(candidate, research, [source])
-    entry, reason = validator.validate(candidate, research, None, [], [source])
+    entry, reason = validator.validate(candidate, research, None, [])
+    assert entry is None and reason == "verification is required"
+
+    verification = VerificationResult(
+        verified=True,
+        canonical_name="星街すいせい",
+        reading="ほしまちすいせい",
+        confidence=1,
+        evidence=[
+            Evidence(
+                url=source.url,
+                source_type="official_agency_profile",
+                claim="読みはほしまちすいせい",
+            )
+        ],
+    )
+    entry, reason = validator.validate(candidate, research, verification, [])
     assert reason is None and entry is not None
 
 
@@ -826,7 +841,7 @@ async def test_pipeline_compiles_verified_agency_candidate_below_threshold(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_pipeline_skips_verification_for_prefetched_agency_profile(tmp_path: Path) -> None:
+async def test_pipeline_verifies_prefetched_agency_profile(tmp_path: Path) -> None:
     profile_url = "https://agency.example/talents/suisei"
     source = WebSource(
         url=profile_url,
@@ -860,7 +875,10 @@ async def test_pipeline_skips_verification_for_prefetched_agency_profile(tmp_pat
                 status="resolved",
             )
 
-    class MustNotVerify:
+    class Verifier:
+        def __init__(self) -> None:
+            self.calls = 0
+
         async def verify(
             self,
             candidate: Candidate,
@@ -868,7 +886,14 @@ async def test_pipeline_skips_verification_for_prefetched_agency_profile(tmp_pat
             metrics: AudienceMetrics,
             sources: list[WebSource],
         ) -> VerificationResult:
-            raise AssertionError("official agency evidence must skip verification")
+            self.calls += 1
+            return VerificationResult(
+                verified=True,
+                canonical_name=research.canonical_name,
+                reading=research.reading,
+                confidence=1,
+                evidence=research.evidence,
+            )
 
     data_dir, dist_dir = tmp_path / "data", tmp_path / "dist"
     candidates = CandidateRepository(data_dir / "candidates.jsonl")
@@ -880,19 +905,21 @@ async def test_pipeline_skips_verification_for_prefetched_agency_profile(tmp_pat
             youtube_channel_id="UC123",
         )
     )
+    verifier = Verifier()
     pipeline = Pipeline(
         candidates=candidates,
         entries=EntryRepository(data_dir / "entries.jsonl"),
         reviews=ReviewRepository(data_dir / "review_required.jsonl"),
         platforms=Metrics(),
         researcher=Researcher(),
-        verifier=MustNotVerify(),
+        verifier=verifier,
         validator=DeterministicValidator(),
         compiler=DictionaryCompiler(),
         settings=Settings(data_dir=data_dir, dist_dir=dist_dir),
         web_sources=Sources(),
     )
     assert await pipeline.run() == 1
+    assert verifier.calls == 1
 
 
 @pytest.mark.asyncio

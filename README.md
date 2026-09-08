@@ -127,10 +127,8 @@ YouTube/Twitch 概要を取得し、本文を上限付きで Agent に渡しま�
 解決できなければ `unresolved` となります。
 
 ReadingResearchAgent は事前取得した公式事務所プロフィール、本人プロフィール、YouTube/Twitch
-概要から読みを調査します。事務所候補では、取得済みの公式プロフィール URL と一致する
-`official_agency_profile` 根拠で読みが解決した場合に限り VerificationAgent を省略します。
-それ以外は VerificationAgent が同じ事前取得ソースを監査します。公式根拠のない漢字・ローマ字からの
-推測は `unresolved` となり、採用されません。
+概要から読みを調査します。すべての候補を VerificationAgent が同じ事前取得ソースで監査します。
+公式根拠のない漢字・ローマ字からの推測は `unresolved` となり、採用されません。
 
 同一人物の統合は YouTube channel ID、Twitch user ID、または公式プロフィール URL の一致だけで行います。表示名が一致するだけでは統合せず、曖昧なものは `review_required` です。候補の元の表示名を Unicode 正規化した上で、実質文字がカタカナとラテン文字だけの場合は `rejected` とし、プラットフォーム API や OpenAI Agent を呼ぶ前に除外します。漢字またはひらがなを含む候補は除外しません。既存エントリと Agent の正式表記にも同じ判定を適用して、別名の併記による漏れを防ぎます。既に辞書化された候補は canonical ID、YouTube channel ID、または Twitch user ID の一致で判定し、プラットフォーム API・公式ページ取得・OpenAI Agent による調査および検証の対象から除外します。
 

@@ -99,11 +99,7 @@ class Pipeline:
                 candidate.status = CandidateStatus.REJECTED
                 self.candidates.replace(candidates)
                 continue
-            verification = (
-                None
-                if self.validator.can_skip_verification(candidate, research, sources)
-                else await self.verifier.verify(candidate, research, metrics, sources)
-            )
+            verification = await self.verifier.verify(candidate, research, metrics, sources)
             if (
                 verification
                 and verification.canonical_name
@@ -113,9 +109,7 @@ class Pipeline:
                 self.candidates.replace(candidates)
                 continue
             prior = [entry for entry in existing if entry.canonical_id != candidate.canonical_id]
-            entry, reason = self.validator.validate(
-                candidate, research, verification, prior, sources
-            )
+            entry, reason = self.validator.validate(candidate, research, verification, prior)
             if entry is None:
                 candidate.status = CandidateStatus.REVIEW_REQUIRED
                 self.reviews.checkpoint_review(

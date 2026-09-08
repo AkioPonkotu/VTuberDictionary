@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import cast
 
 from .domain import Agency, Candidate, now
 from .ports import AgencyTalentSource, TwitchStreamSource
@@ -74,7 +73,12 @@ class TwitchDiscovery:
         async for page in self.source.stream_pages(self.language, cursor):
             discovered_on_page: list[Candidate] = []
             for stream in page.streams:
-                tags = [str(item).casefold() for item in cast(list[object], stream.get("tags", []))]
+                raw_tags = stream.get("tags")
+                tags = (
+                    [str(item).casefold() for item in raw_tags]
+                    if isinstance(raw_tags, list)
+                    else []
+                )
                 user_id = str(stream.get("user_id", ""))
                 if self.tag not in tags or not user_id:
                     continue

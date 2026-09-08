@@ -83,6 +83,7 @@ class FakeStreams:
                         "tags": ["vTuBeR"],
                     },
                     {"user_id": "2", "user_login": "two", "user_name": "Two", "tags": ["gaming"]},
+                    {"user_id": "3", "user_login": "three", "user_name": "Three", "tags": None},
                 ],
                 next_cursor=None,
             )

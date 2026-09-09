@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
@@ -24,9 +26,12 @@ def valid_twitch_login(value: str) -> str | None:
 
 
 class ApiError(RuntimeError):
-    def __init__(self, message: str, *, retryable: bool = False) -> None:
+    def __init__(
+        self, message: str, *, retryable: bool = False, retry_after: float | None = None
+    ) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.retry_after = retry_after
 
 
 class AuthenticationError(ApiError):
@@ -46,9 +51,25 @@ class ClientRequestError(ApiError):
 
 
 class RetryingHttpClient:
-    def __init__(self, timeout_seconds: float = 20, retries: int = 3) -> None:
+    """HTTP retry policy with global and per-origin request limits."""
+
+    def __init__(
+        self,
+        timeout_seconds: float = 20,
+        retries: int = 3,
+        *,
+        max_concurrency: int = 8,
+        per_host_concurrency: int = 2,
+    ) -> None:
         self.client = httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True)
         self.retries = retries
+        self._requests = asyncio.Semaphore(max_concurrency)
+        self._per_host_concurrency = per_host_concurrency
+        self._host_locks: dict[str, asyncio.Semaphore] = {}
+
+    def _host_lock(self, url: str) -> asyncio.Semaphore:
+        host = urlparse(url).netloc.casefold()
+        return self._host_locks.setdefault(host, asyncio.Semaphore(self._per_host_concurrency))
 
     @staticmethod
     def _raise_classified(response: httpx.Response) -> None:
@@ -56,10 +77,18 @@ class RetryingHttpClient:
             return
         if response.status_code in {401, 403}:
             raise AuthenticationError(f"authentication failed for {response.url}")
+        retry_after: float | None = None
+        if value := response.headers.get("Retry-After"):
+            with suppress(ValueError):
+                retry_after = max(0.0, float(value))
         if response.status_code == 429:
-            raise RateLimitError(f"rate limited by {response.url}", retryable=True)
+            raise RateLimitError(
+                f"rate limited by {response.url}", retryable=True, retry_after=retry_after
+            )
         if response.status_code >= 500:
-            raise RemoteServiceError(f"service error from {response.url}", retryable=True)
+            raise RemoteServiceError(
+                f"service error from {response.url}", retryable=True, retry_after=retry_after
+            )
         raise ClientRequestError(f"request rejected by {response.url}: {response.status_code}")
 
     async def _request(
@@ -70,7 +99,8 @@ class RetryingHttpClient:
     ) -> httpx.Response:
         for attempt in range(self.retries):
             try:
-                response = await self.client.request(method, url, **kwargs)
+                async with self._requests, self._host_lock(url):
+                    response = await self.client.request(method, url, **kwargs)
                 self._raise_classified(response)
                 return response
             except httpx.TimeoutException as exc:
@@ -84,7 +114,9 @@ class RetryingHttpClient:
                     extra={"url": url, "attempt": attempt + 1, "error_type": type(error).__name__},
                 )
                 raise error
-            await asyncio.sleep(2**attempt)
+            # Retry-After is a lower bound. Jitter prevents a fleet of workers
+            # from issuing a synchronized follow-up request.
+            await asyncio.sleep(max(error.retry_after or 0.0, (2**attempt) + random.random()))
         raise AssertionError("unreachable")
 
     async def get_json(
@@ -106,9 +138,7 @@ class RetryingHttpClient:
         response = await self._request("POST", url, data=data)
         return cast(dict[str, Any], response.json())
 
-    async def get_text(
-        self, url: str, *, headers: dict[str, str] | None = None
-    ) -> str:
+    async def get_text(self, url: str, *, headers: dict[str, str] | None = None) -> str:
         return (await self._request("GET", url, headers=headers)).text
 
     async def aclose(self) -> None:
@@ -122,9 +152,11 @@ class TwitchHelixClient:
         access_token: str,
         http: RetryingHttpClient | None = None,
         max_pages: int = 20,
+        max_concurrency: int = 2,
     ) -> None:
         self.headers = {"Client-Id": client_id, "Authorization": f"Bearer {access_token}"}
         self.http, self.max_pages = http or RetryingHttpClient(), max_pages
+        self._requests = asyncio.Semaphore(max_concurrency)
 
     async def stream_pages(
         self, language: str | None, cursor: str | None = None
@@ -135,9 +167,10 @@ class TwitchHelixClient:
                 params["language"] = language
             if cursor:
                 params["after"] = cursor
-            payload = await self.http.get_json(
-                "https://api.twitch.tv/helix/streams", params=params, headers=self.headers
-            )
+            async with self._requests:
+                payload = await self.http.get_json(
+                    "https://api.twitch.tv/helix/streams", params=params, headers=self.headers
+                )
             next_cursor = payload.get("pagination", {}).get("cursor")
             yield TwitchStreamPage(
                 streams=list(payload.get("data", [])),
@@ -148,6 +181,10 @@ class TwitchHelixClient:
                 return
 
     async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+        async with self._requests:
+            return await self._audience_metrics(candidate)
+
+    async def _audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
         if not candidate.twitch_user_id and candidate.twitch_login:
             login = valid_twitch_login(candidate.twitch_login)
             if login is None:
@@ -201,10 +238,17 @@ async def twitch_app_access_token(
 
 
 class YouTubeDataClient:
-    def __init__(self, api_key: str, http: RetryingHttpClient | None = None) -> None:
+    def __init__(
+        self, api_key: str, http: RetryingHttpClient | None = None, max_concurrency: int = 2
+    ) -> None:
         self.api_key, self.http = api_key, http or RetryingHttpClient()
+        self._requests = asyncio.Semaphore(max_concurrency)
 
     async def audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
+        async with self._requests:
+            return await self._audience_metrics(candidate)
+
+    async def _audience_metrics(self, candidate: Candidate) -> AudienceMetrics:
         params = {"part": "snippet,statistics", "key": self.api_key}
         if candidate.youtube_channel_id:
             params["id"] = candidate.youtube_channel_id

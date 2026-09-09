@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import random
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -25,8 +27,9 @@ class AgentFrameworkJsonRunner:
     execution environment as documented in the README.
     """
 
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(self, api_key: str, model: str, max_concurrency: int = 2) -> None:
         self.api_key, self.model = api_key, model
+        self._requests = asyncio.Semaphore(max_concurrency)
 
     async def run_json(
         self, instructions: str, prompt: str, response_model: type[BaseModel]
@@ -46,11 +49,35 @@ class AgentFrameworkJsonRunner:
             instructions=instructions,
             tools=[],
         )
-        response = await agent.run(prompt, options={"response_format": response_model})
+        # Research and verification are serial per candidate in the pipeline,
+        # but this shared gate limits simultaneous calls across candidates.
+        async with self._requests:
+            response = await self._run_with_backoff(agent, prompt, response_model)
         value = getattr(response, "value", None)
         if isinstance(value, BaseModel):
             return value.model_dump_json()
         return str(getattr(response, "text", response))
+
+    @staticmethod
+    async def _run_with_backoff(
+        agent: object, prompt: str, response_model: type[BaseModel]
+    ) -> object:
+        for attempt in range(3):
+            try:
+                # Agent Framework's concrete agent type is intentionally not a
+                # runtime dependency of this module's import surface.
+                return await agent.run(prompt, options={"response_format": response_model})  # type: ignore[attr-defined]
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                if status not in {429, 503} or attempt == 2:
+                    raise
+                headers = getattr(getattr(exc, "response", None), "headers", {})
+                try:
+                    retry_after = float(headers.get("Retry-After", 0))
+                except (AttributeError, TypeError, ValueError):
+                    retry_after = 0.0
+                await asyncio.sleep(max(retry_after, 2**attempt + random.random()))
+        raise AssertionError("unreachable")
 
 
 class MissingOpenAICredentials:

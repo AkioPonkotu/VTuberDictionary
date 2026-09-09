@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     twitch_crawler_enabled: bool = True
     twitch_crawler_max_results: int = Field(default=3, ge=1, le=5)
     twitch_crawler_delay_seconds: float = Field(default=1.0, ge=0.1, le=60)
+    processing_concurrency: int = Field(default=6, ge=1, le=8)
     data_dir: Path = Path("data")
     dist_dir: Path = Path("dist")
 

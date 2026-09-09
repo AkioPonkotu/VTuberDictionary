@@ -80,6 +80,8 @@ uv run vtuber-dictionary process                   # 永続化済み候補を調
 
 `update` は従来どおり両方を順に実行します。GitHub Actions の定期更新では `discover` の結果を先にコミットしてから `process` を実行するため、後者の外部 API または Agent 呼び出しが失敗しても、次回実行は発見済み候補から再開します。
 
+`PROCESSING_CONCURRENCY`（既定値 `6`、範囲 `1`–`8`）は候補間の外部 I/O ワーカー数です。候補は発見日時と ID で固定順に採用されるため、取得完了順によって辞書・レビュー・成果物の内容は変わりません。候補状態は外部呼び出しごとに保存され、`pending_entry` がある再開時は AI を呼び直さず公開だけを回復します。
+
 ### Twitch の定期更新（GitHub Actions）
 
 `.github/workflows/update-twitch.yml` は UTC の毎時 `:23`、4時間おき（JST では 01:23、05:23、09:23、13:23、17:23、21:23）に実行されます。手動実行も Actions 画面の **Update dictionary from Twitch** から可能です。事務所更新と同じキューを共有するため、同時に辞書データを更新しません。

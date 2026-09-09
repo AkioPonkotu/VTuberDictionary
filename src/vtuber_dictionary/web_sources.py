@@ -146,19 +146,23 @@ class TwitchSearchSourcePrefetcher(OfficialSourcePrefetcher):
         self.search_source_maximum_characters = search_source_maximum_characters
         self._next_request_at = 0.0
         self._robots: dict[str, RobotFileParser | bool] = {}
+        # Search and robots cache mutations are intentionally one-at-a-time,
+        # even when pipeline candidates are being researched concurrently.
+        self._crawl_lock = asyncio.Lock()
 
     async def fetch(self, candidate: Candidate, metrics: AudienceMetrics) -> list[WebSource]:
         sources = await super().fetch(candidate, metrics)
         if not self.enabled or "twitch_vtuber_tag" not in candidate.discovery_sources:
             return sources
-        for result_url in await self._search(candidate, metrics):
-            if not await self._can_fetch(result_url):
-                continue
-            body = await self._get_text(result_url)
-            if content := visible_text(body, self.search_source_maximum_characters):
-                # A search result is not asserted official by the application. Both
-                # independent agents must establish that from the fetched content.
-                sources.append(WebSource(url=result_url, source_type="other", content=content))
+        async with self._crawl_lock:
+            for result_url in await self._search(candidate, metrics):
+                if not await self._can_fetch(result_url):
+                    continue
+                body = await self._get_text(result_url)
+                if content := visible_text(body, self.search_source_maximum_characters):
+                    # A search result is not asserted official by the application. Both
+                    # independent agents must establish that from the fetched content.
+                    sources.append(WebSource(url=result_url, source_type="other", content=content))
         return sources
 
     async def _search(self, candidate: Candidate, metrics: AudienceMetrics) -> list[str]:

@@ -161,4 +161,4 @@ def main() -> None:
         count = asyncio.run(process(Settings(), sources))
     else:
         count = asyncio.run(update(Settings(), sources))
-    logging.getLogger(__name__).info("dictionary_update_complete", extra={"new_entries": count})
+    logging.getLogger(__name__).info("dictionary_update_complete new_entries=%s", count)

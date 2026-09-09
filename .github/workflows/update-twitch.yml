@@ -1,9 +1,7 @@
 name: Update dictionary from Twitch
 
 on:
-  schedule:
-    # Every four hours at :23 UTC (01:23, 05:23, 09:23, 13:23, 17:23, 21:23 JST).
-    - cron: "23 */4 * * *"
+  # Periodic execution is temporarily paused. Manual dispatch remains available.
   workflow_dispatch:
 
 permissions:

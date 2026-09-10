@@ -123,7 +123,10 @@ class AgentFrameworkJsonRunner:
                     await asyncio.sleep(2**attempt + random.random())
                     attempt += 1
                     continue
-                if status not in {429, 500, 503} or loop.time() >= deadline:
+                if (
+                    status not in {429, 500, 503}
+                    and not AgentFrameworkJsonRunner._is_connection_error(exc)
+                ) or loop.time() >= deadline:
                     raise
                 # The service's hint is a lower bound.  A shared deferment and
                 # jittered backoff let the entire request stream drain instead
@@ -169,6 +172,24 @@ class AgentFrameworkJsonRunner:
                     pending.append(linked)
             pending.extend(value for value in current.args if isinstance(value, BaseException))
         return None, 0.0
+
+    @staticmethod
+    def _is_connection_error(exc: Exception) -> bool:
+        """Recognize SDK transport failures wrapped by Agent Framework."""
+        pending: list[BaseException] = [exc]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            if type(current).__name__ in {"APIConnectionError", "ReadError", "ConnectError"}:
+                return True
+            for linked in (current.__cause__, current.__context__):
+                if linked is not None:
+                    pending.append(linked)
+            pending.extend(value for value in current.args if isinstance(value, BaseException))
+        return False
 
     @staticmethod
     def _retry_after(headers: object) -> float:

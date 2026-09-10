@@ -38,14 +38,12 @@ class AgentFrameworkJsonRunner:
         model: str,
         max_concurrency: int = 2,
         min_request_interval_seconds: float = 1.0,
-        max_output_tokens: int = 768,
         rate_limit_retry_seconds: float = 900.0,
     ) -> None:
         self.api_key, self.model = api_key, model
         self._requests = asyncio.Semaphore(max_concurrency)
         self._client: Any | None = None
         self._min_request_interval_seconds = min_request_interval_seconds
-        self._max_output_tokens = max_output_tokens
         self._rate_limit_retry_seconds = rate_limit_retry_seconds
         self._request_schedule_lock = asyncio.Lock()
         self._next_request_at = 0.0
@@ -104,11 +102,6 @@ class AgentFrameworkJsonRunner:
                         prompt,
                         options={
                             "response_format": response_model,
-                            # These compact, schema-constrained records do not
-                            # need the framework's 1,000-token default output
-                            # reservation.  Lowering it prevents a large
-                            # output budget from consuming the TPM allowance.
-                            "max_tokens": self._max_output_tokens,
                         },
                     )
                 value = getattr(response, "value", None)

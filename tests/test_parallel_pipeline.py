@@ -150,16 +150,10 @@ def test_openai_request_interval_environment_bounds(monkeypatch: pytest.MonkeyPa
         Settings(_env_file=None)
 
 
-def test_openai_output_and_rate_limit_recovery_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENAI_MAX_OUTPUT_TOKENS", raising=False)
+def test_openai_rate_limit_recovery_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_RATE_LIMIT_RETRY_SECONDS", raising=False)
     settings = Settings(_env_file=None)
-    assert settings.openai_max_output_tokens == 768
     assert settings.openai_rate_limit_retry_seconds == 900
-    monkeypatch.setenv("OPENAI_MAX_OUTPUT_TOKENS", "255")
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None)
-    monkeypatch.setenv("OPENAI_MAX_OUTPUT_TOKENS", "768")
     monkeypatch.setenv("OPENAI_RATE_LIMIT_RETRY_SECONDS", "0")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)

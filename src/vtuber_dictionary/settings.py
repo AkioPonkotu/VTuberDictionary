@@ -33,7 +33,6 @@ class Settings(BaseSettings):
     # per second is a conservative default; deployments with a known higher
     # allowance can lower this via OPENAI_MIN_REQUEST_INTERVAL_SECONDS.
     openai_min_request_interval_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
-    openai_max_output_tokens: int = Field(default=768, ge=256, le=1_000)
     openai_rate_limit_retry_seconds: float = Field(default=900.0, ge=1.0, le=3_600.0)
     data_dir: Path = Path("data")
     dist_dir: Path = Path("dist")

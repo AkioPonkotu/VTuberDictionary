@@ -50,7 +50,7 @@ async def test_runner_retries_a_rate_limit_wrapped_by_agent_framework(
 
 
 @pytest.mark.asyncio
-async def test_runner_uses_compact_structured_output_options() -> None:
+async def test_runner_uses_structured_output_options() -> None:
     class Agent:
         seen_options: dict[str, object] | None = None
 
@@ -59,12 +59,11 @@ async def test_runner_uses_compact_structured_output_options() -> None:
             return type("Valid", (), {"text": '{"value":"ok"}'})()
 
     agent = Agent()
-    runner = AgentFrameworkJsonRunner("test-key", "test-model", max_output_tokens=768)
+    runner = AgentFrameworkJsonRunner("test-key", "test-model")
 
     assert await runner._run_with_backoff(agent, "prompt", _ResponseModel)
     assert agent.seen_options == {
         "response_format": _ResponseModel,
-        "max_tokens": 768,
     }
 
 

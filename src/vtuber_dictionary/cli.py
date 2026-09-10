@@ -99,7 +99,6 @@ async def process(settings: Settings, processing_sources: set[str] | None = None
             settings.openai_model,
             max_concurrency=settings.openai_concurrency,
             min_request_interval_seconds=settings.openai_min_request_interval_seconds,
-            max_output_tokens=settings.openai_max_output_tokens,
             rate_limit_retry_seconds=settings.openai_rate_limit_retry_seconds,
         )
         researcher = ReadingResearchAgent(runner)

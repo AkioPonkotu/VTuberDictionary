@@ -95,14 +95,11 @@ jobs:
           PROCESSING_CONCURRENCY: ${{ vars.PROCESSING_CONCURRENCY || '96' }}
           OPENAI_CONCURRENCY: ${{ vars.OPENAI_CONCURRENCY || '32' }}
           OPENAI_MIN_REQUEST_INTERVAL_SECONDS: ${{ vars.OPENAI_MIN_REQUEST_INTERVAL_SECONDS || '1.0' }}
-          OPENAI_MAX_OUTPUT_TOKENS: ${{ vars.OPENAI_MAX_OUTPUT_TOKENS || '768' }}
           OPENAI_RATE_LIMIT_RETRY_SECONDS: ${{ vars.OPENAI_RATE_LIMIT_RETRY_SECONDS || '900' }}
           TWITCH_DISCOVERY_ENABLED: ${{ vars.TWITCH_DISCOVERY_ENABLED || 'true' }}
           TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
           TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
           TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
-          TWITCH_CRAWLER_MAX_RESULTS: ${{ vars.TWITCH_CRAWLER_MAX_RESULTS || '1' }}
-          TWITCH_CRAWLER_DELAY_SECONDS: ${{ vars.TWITCH_CRAWLER_DELAY_SECONDS || '0.1' }}
         run: uv run vtuber-dictionary discover --source twitch
       - name: Checkpoint discovered candidates before research
         shell: bash
@@ -128,14 +125,11 @@ jobs:
           PROCESSING_CONCURRENCY: ${{ vars.PROCESSING_CONCURRENCY || '96' }}
           OPENAI_CONCURRENCY: ${{ vars.OPENAI_CONCURRENCY || '32' }}
           OPENAI_MIN_REQUEST_INTERVAL_SECONDS: ${{ vars.OPENAI_MIN_REQUEST_INTERVAL_SECONDS || '1.0' }}
-          OPENAI_MAX_OUTPUT_TOKENS: ${{ vars.OPENAI_MAX_OUTPUT_TOKENS || '768' }}
           OPENAI_RATE_LIMIT_RETRY_SECONDS: ${{ vars.OPENAI_RATE_LIMIT_RETRY_SECONDS || '900' }}
           TWITCH_DISCOVERY_ENABLED: ${{ vars.TWITCH_DISCOVERY_ENABLED || 'true' }}
           TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
           TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
           TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
-          TWITCH_CRAWLER_MAX_RESULTS: ${{ vars.TWITCH_CRAWLER_MAX_RESULTS || '1' }}
-          TWITCH_CRAWLER_DELAY_SECONDS: ${{ vars.TWITCH_CRAWLER_DELAY_SECONDS || '0.1' }}
         run: uv run vtuber-dictionary process --source twitch
       - name: Commit changed canonical data and artifact
         id: commit

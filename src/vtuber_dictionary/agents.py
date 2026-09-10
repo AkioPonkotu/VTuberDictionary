@@ -123,7 +123,7 @@ class AgentFrameworkJsonRunner:
                     await asyncio.sleep(2**attempt + random.random())
                     attempt += 1
                     continue
-                if status not in {429, 503} or loop.time() >= deadline:
+                if status not in {429, 500, 503} or loop.time() >= deadline:
                     raise
                 # The service's hint is a lower bound.  A shared deferment and
                 # jittered backoff let the entire request stream drain instead

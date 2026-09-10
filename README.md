@@ -80,7 +80,7 @@ uv run vtuber-dictionary process                   # 永続化済み候補を調
 
 `update` は従来どおり両方を順に実行します。GitHub Actions の定期更新では `discover` の結果を先にコミットしてから `process` を実行するため、後者の外部 API または Agent 呼び出しが失敗しても、次回実行は発見済み候補から再開します。
 
-`PROCESSING_CONCURRENCY`（既定値 `6`、範囲 `1`–`128`）は候補間の外部 I/O ワーカー数です。`OPENAI_CONCURRENCY`（既定値 `2`、範囲 `1`–`128`）は調査・検証で共有する OpenAI リクエスト数です。`OPENAI_MIN_REQUEST_INTERVAL_SECONDS`（既定値 `1.0`）はリクエスト開始間隔の下限です。`OPENAI_MAX_OUTPUT_TOKENS`（既定値 `384`）はこのJSON抽出の出力予約を抑え、`OPENAI_RATE_LIMIT_RETRY_SECONDS`（既定値 `900`）は429/503の共有回復待機時間を定めます。候補ごとの調査・検証・再試行は完了順に採用・公開されるため、同じ読みや表記が競合した場合は先に完了した候補が優先されます。候補状態は外部呼び出しごとに保存され、`pending_entry` がある再開時は AI を呼び直さず公開だけを回復します。
+`PROCESSING_CONCURRENCY`（既定値 `6`、範囲 `1`–`128`）は候補間の外部 I/O ワーカー数です。`OPENAI_CONCURRENCY`（既定値 `2`、範囲 `1`–`128`）は調査・検証で共有する OpenAI リクエスト数です。`OPENAI_MIN_REQUEST_INTERVAL_SECONDS`（既定値 `1.0`）はリクエスト開始間隔の下限です。`OPENAI_MAX_OUTPUT_TOKENS`（既定値 `768`）はこのJSON抽出の出力予約を抑え、`OPENAI_RATE_LIMIT_RETRY_SECONDS`（既定値 `900`）は429/503の共有回復待機時間を定めます。候補ごとの調査・検証・再試行は完了順に採用・公開されるため、同じ読みや表記が競合した場合は先に完了した候補が優先されます。候補状態は外部呼び出しごとに保存され、`pending_entry` がある再開時は AI を呼び直さず公開だけを回復します。
 
 ### Twitch の定期更新（GitHub Actions）
 

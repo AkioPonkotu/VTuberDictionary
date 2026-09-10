@@ -32,7 +32,7 @@ async def test_runner_retries_a_rate_limit_wrapped_by_agent_framework(
             self.calls += 1
             if self.calls == 1:
                 raise AgentFrameworkWrapper("wrapped", RateLimited())
-            return object()
+            return type("Valid", (), {"text": '{"value":"ok"}'})()
 
     delays: list[float] = []
 
@@ -56,14 +56,37 @@ async def test_runner_uses_compact_structured_output_options() -> None:
 
         async def run(self, _: object, *, options: dict[str, object]) -> object:
             self.seen_options = options
-            return object()
+            return type("Valid", (), {"text": '{"value":"ok"}'})()
 
     agent = Agent()
-    runner = AgentFrameworkJsonRunner("test-key", "test-model", max_output_tokens=384)
+    runner = AgentFrameworkJsonRunner("test-key", "test-model", max_output_tokens=768)
 
     assert await runner._run_with_backoff(agent, "prompt", _ResponseModel)
     assert agent.seen_options == {
         "response_format": _ResponseModel,
-        "max_tokens": 384,
-        "verbosity": "low",
+        "max_tokens": 768,
     }
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_an_empty_structured_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Agent:
+        calls = 0
+
+        async def run(self, *_: object, **__: object) -> object:
+            self.calls += 1
+            if self.calls == 1:
+                return type("Empty", (), {"text": ""})()
+            return type("Valid", (), {"text": '{"value":"ok"}'})()
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+    agent = Agent()
+    runner = AgentFrameworkJsonRunner("test-key", "test-model")
+
+    assert await runner._run_with_backoff(agent, "prompt", _ResponseModel) == '{"value":"ok"}'
+    assert agent.calls == 2

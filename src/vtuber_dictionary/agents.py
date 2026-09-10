@@ -19,6 +19,10 @@ class JsonAgentRunner(Protocol):
     ) -> str: ...
 
 
+class _InvalidStructuredResponse(Exception):
+    """An incomplete model response that cannot be persisted as agent JSON."""
+
+
 class AgentFrameworkJsonRunner:
     """Adapter around Microsoft Agent Framework's OpenAI chat client.
 
@@ -34,7 +38,7 @@ class AgentFrameworkJsonRunner:
         model: str,
         max_concurrency: int = 2,
         min_request_interval_seconds: float = 1.0,
-        max_output_tokens: int = 384,
+        max_output_tokens: int = 768,
         rate_limit_retry_seconds: float = 900.0,
     ) -> None:
         self.api_key, self.model = api_key, model
@@ -81,16 +85,12 @@ class AgentFrameworkJsonRunner:
         # Research and verification are serial per candidate in the pipeline.
         # ``_run_with_backoff`` acquires the shared gate for each individual
         # network attempt, rather than holding a slot while a 429 is sleeping.
-        response = await self._run_with_backoff(agent, prompt, response_model)
-        value = getattr(response, "value", None)
-        if isinstance(value, BaseModel):
-            return value.model_dump_json()
-        return str(getattr(response, "text", response))
+        return await self._run_with_backoff(agent, prompt, response_model)
 
     async def _run_with_backoff(
         self,
         agent: object, prompt: str, response_model: type[BaseModel]
-    ) -> object:
+    ) -> str:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._rate_limit_retry_seconds
         attempt = 0
@@ -100,7 +100,7 @@ class AgentFrameworkJsonRunner:
                 # runtime dependency of this module's import surface.
                 await self._wait_for_request_slot()
                 async with self._requests:
-                    return await agent.run(  # type: ignore[attr-defined]
+                    response = await agent.run(  # type: ignore[attr-defined]
                         prompt,
                         options={
                             "response_format": response_model,
@@ -109,11 +109,27 @@ class AgentFrameworkJsonRunner:
                             # reservation.  Lowering it prevents a large
                             # output budget from consuming the TPM allowance.
                             "max_tokens": self._max_output_tokens,
-                            "verbosity": "low",
                         },
                     )
+                value = getattr(response, "value", None)
+                raw = value.model_dump_json() if isinstance(value, BaseModel) else str(
+                    getattr(response, "text", response)
+                )
+                # A token-limited reasoning response can complete without a
+                # visible JSON payload.  Never pass that on as a pipeline-wide
+                # Pydantic error; ask the same agent again before persisting.
+                try:
+                    response_model.model_validate_json(raw)
+                except ValueError as exc:
+                    raise _InvalidStructuredResponse from exc
+                return raw
             except Exception as exc:
                 status, retry_after = AgentFrameworkJsonRunner._retry_details(exc)
+                retryable_invalid_response = isinstance(exc, _InvalidStructuredResponse)
+                if retryable_invalid_response and attempt < 2:
+                    await asyncio.sleep(2**attempt + random.random())
+                    attempt += 1
+                    continue
                 if status not in {429, 503} or loop.time() >= deadline:
                     raise
                 # The service's hint is a lower bound.  A shared deferment and

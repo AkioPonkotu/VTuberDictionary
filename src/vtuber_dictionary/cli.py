@@ -126,6 +126,7 @@ async def process(settings: Settings, processing_sources: set[str] | None = None
             enabled=settings.twitch_crawler_enabled,
             max_results=settings.twitch_crawler_max_results,
             minimum_delay_seconds=settings.twitch_crawler_delay_seconds,
+            max_concurrency=settings.twitch_crawler_concurrency,
         ),
     )
     return await pipeline.run()

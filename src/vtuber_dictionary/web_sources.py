@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
-import time
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
@@ -117,8 +116,7 @@ class TwitchSearchSourcePrefetcher(OfficialSourcePrefetcher):
 
     The crawler deliberately searches only for Twitch-tag discovery candidates. Agency
     candidates retain their direct, official-profile-only path. Search pages and result
-    pages are fetched serially with a minimum delay so this remains a small, polite
-    fallback rather than a general-purpose crawling system.
+    pages are fetched concurrently with bounded candidate and HTTP pools.
     """
 
     _SEARCH_URL = "https://html.duckduckgo.com/html/"
@@ -132,10 +130,17 @@ class TwitchSearchSourcePrefetcher(OfficialSourcePrefetcher):
         *,
         enabled: bool = True,
         max_results: int = 3,
-        minimum_delay_seconds: float = 1.0,
+        minimum_delay_seconds: float = 0.0,
+        max_concurrency: int = 32,
         search_source_maximum_characters: int = 3_000,
     ) -> None:
-        super().__init__(http=http, maximum_characters=maximum_characters)
+        super().__init__(
+            http=http
+            or RetryingHttpClient(
+                max_concurrency=max_concurrency, per_host_concurrency=max_concurrency
+            ),
+            maximum_characters=maximum_characters,
+        )
         if max_results < 1:
             raise ValueError("max_results must be at least 1")
         if minimum_delay_seconds < 0:
@@ -144,25 +149,22 @@ class TwitchSearchSourcePrefetcher(OfficialSourcePrefetcher):
         self.max_results = max_results
         self.minimum_delay_seconds = minimum_delay_seconds
         self.search_source_maximum_characters = search_source_maximum_characters
-        self._next_request_at = 0.0
         self._robots: dict[str, RobotFileParser | bool] = {}
-        # Search and robots cache mutations are intentionally one-at-a-time,
-        # even when pipeline candidates are being researched concurrently.
-        self._crawl_lock = asyncio.Lock()
+        self._crawl_slots = asyncio.Semaphore(max_concurrency)
+        self._robots_lock = asyncio.Lock()
 
     async def fetch(self, candidate: Candidate, metrics: AudienceMetrics) -> list[WebSource]:
         sources = await super().fetch(candidate, metrics)
         if not self.enabled or "twitch_vtuber_tag" not in candidate.discovery_sources:
             return sources
-        async with self._crawl_lock:
+        async with self._crawl_slots:
             for result_url in await self._search(candidate, metrics):
-                if not await self._can_fetch(result_url):
-                    continue
-                body = await self._get_text(result_url)
-                if content := visible_text(body, self.search_source_maximum_characters):
-                    # A search result is not asserted official by the application. Both
-                    # independent agents must establish that from the fetched content.
-                    sources.append(WebSource(url=result_url, source_type="other", content=content))
+                if await self._can_fetch(result_url):
+                    body = await self._get_text(result_url)
+                    if content := visible_text(body, self.search_source_maximum_characters):
+                        sources.append(
+                            WebSource(url=result_url, source_type="other", content=content)
+                        )
         return sources
 
     async def _search(self, candidate: Candidate, metrics: AudienceMetrics) -> list[str]:
@@ -183,22 +185,16 @@ class TwitchSearchSourcePrefetcher(OfficialSourcePrefetcher):
         return urls
 
     async def _get_text(self, url: str) -> str:
-        await self._wait_for_request_slot()
         try:
             return await self.http.get_text(url, headers={"User-Agent": self._USER_AGENT})
         except ApiError:
             return ""
 
-    async def _wait_for_request_slot(self) -> None:
-        delay = self._next_request_at - time.monotonic()
-        if delay > 0:
-            await asyncio.sleep(delay)
-        self._next_request_at = time.monotonic() + self.minimum_delay_seconds
-
     async def _can_fetch(self, url: str) -> bool:
         parsed = urlsplit(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
-        policy = self._robots.get(origin)
+        async with self._robots_lock:
+            policy = self._robots.get(origin)
         if policy is None:
             try:
                 robots = await self._get_text_or_raise(urljoin(origin, "/robots.txt"))
@@ -212,13 +208,13 @@ class TwitchSearchSourcePrefetcher(OfficialSourcePrefetcher):
                 parser = RobotFileParser()
                 parser.parse(robots.splitlines())
                 policy = parser
-            self._robots[origin] = policy
+            async with self._robots_lock:
+                self._robots.setdefault(origin, policy)
         return policy is True or (
             isinstance(policy, RobotFileParser) and policy.can_fetch(self._USER_AGENT, url)
         )
 
     async def _get_text_or_raise(self, url: str) -> str:
-        await self._wait_for_request_slot()
         return await self.http.get_text(url, headers={"User-Agent": self._USER_AGENT})
 
     @classmethod

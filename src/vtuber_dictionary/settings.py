@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     twitch_discovery_max_pages: int = Field(default=20, ge=1, le=100)
     twitch_crawler_enabled: bool = True
     twitch_crawler_max_results: int = Field(default=3, ge=1, le=5)
-    twitch_crawler_delay_seconds: float = Field(default=1.0, ge=0.1, le=60)
+    twitch_crawler_delay_seconds: float = Field(default=0.0, ge=0.0, le=60)
+    twitch_crawler_concurrency: int = Field(default=32, ge=1, le=128)
     # A Twitch checkpoint can contain hundreds of independent candidates.  The
     # source-specific clients retain their own limits, so this is intentionally
     # allowed to be higher than the normal worker count for a catch-up run.

@@ -100,6 +100,8 @@ jobs:
           TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
           TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
           TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
+          TWITCH_CRAWLER_CONCURRENCY: ${{ vars.TWITCH_CRAWLER_CONCURRENCY || '96' }}
+          TWITCH_CRAWLER_DELAY_SECONDS: ${{ vars.TWITCH_CRAWLER_DELAY_SECONDS || '0' }}
         run: uv run vtuber-dictionary discover --source twitch
       - name: Checkpoint discovered candidates before research
         shell: bash
@@ -130,6 +132,8 @@ jobs:
           TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
           TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
           TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
+          TWITCH_CRAWLER_CONCURRENCY: ${{ vars.TWITCH_CRAWLER_CONCURRENCY || '96' }}
+          TWITCH_CRAWLER_DELAY_SECONDS: ${{ vars.TWITCH_CRAWLER_DELAY_SECONDS || '0' }}
         run: uv run vtuber-dictionary process --source twitch
       - name: Commit changed canonical data and artifact
         id: commit

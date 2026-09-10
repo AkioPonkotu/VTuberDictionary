@@ -123,8 +123,18 @@ def test_processing_concurrency_environment_bounds(monkeypatch: pytest.MonkeyPat
     assert Settings(_env_file=None).processing_concurrency == 6
     monkeypatch.setenv("PROCESSING_CONCURRENCY", "1")
     assert Settings(_env_file=None).processing_concurrency == 1
-    monkeypatch.setenv("PROCESSING_CONCURRENCY", "8")
-    assert Settings(_env_file=None).processing_concurrency == 8
-    monkeypatch.setenv("PROCESSING_CONCURRENCY", "9")
+    monkeypatch.setenv("PROCESSING_CONCURRENCY", "128")
+    assert Settings(_env_file=None).processing_concurrency == 128
+    monkeypatch.setenv("PROCESSING_CONCURRENCY", "129")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_openai_concurrency_environment_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_CONCURRENCY", raising=False)
+    assert Settings(_env_file=None).openai_concurrency == 2
+    monkeypatch.setenv("OPENAI_CONCURRENCY", "96")
+    assert Settings(_env_file=None).openai_concurrency == 96
+    monkeypatch.setenv("OPENAI_CONCURRENCY", "129")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)

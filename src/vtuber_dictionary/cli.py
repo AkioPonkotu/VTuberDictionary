@@ -95,7 +95,9 @@ async def process(settings: Settings, processing_sources: set[str] | None = None
         if not settings.openai_model:
             raise RuntimeError("OPENAI_MODEL is required when OPENAI_API_KEY is configured")
         runner = AgentFrameworkJsonRunner(
-            settings.openai_api_key.get_secret_value(), settings.openai_model
+            settings.openai_api_key.get_secret_value(),
+            settings.openai_model,
+            max_concurrency=settings.openai_concurrency,
         )
         researcher = ReadingResearchAgent(runner)
         verifier = VerificationAgent(runner)

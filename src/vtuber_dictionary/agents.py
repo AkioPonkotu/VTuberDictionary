@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -30,18 +30,33 @@ class AgentFrameworkJsonRunner:
     def __init__(self, api_key: str, model: str, max_concurrency: int = 2) -> None:
         self.api_key, self.model = api_key, model
         self._requests = asyncio.Semaphore(max_concurrency)
+        self._client: Any | None = None
 
     async def run_json(
         self, instructions: str, prompt: str, response_model: type[BaseModel]
     ) -> str:
         try:
             from agent_framework.openai import OpenAIChatClient
+            from openai import AsyncOpenAI
         except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific
             raise RuntimeError(
                 "Microsoft Agent Framework OpenAI provider is unavailable; "
                 "install agent-framework-openai compatible with agent-framework-core."
             ) from exc
-        client = OpenAIChatClient(api_key=self.api_key, model=self.model)
+        # Agent Framework documents that one chat client can safely serve
+        # concurrent calls on an event loop as long as each call gets its own
+        # Agent.  Reusing it also preserves the HTTP connection pool during a
+        # high-concurrency checkpoint catch-up.
+        if self._client is None:
+            # The application retry loop below is the single retry authority.
+            # Disable the SDK's default retries so a 429 cannot fan out into
+            # nested retry bursts when many candidates are active.
+            self._client = OpenAIChatClient(
+                api_key=self.api_key,
+                model=self.model,
+                async_client=AsyncOpenAI(api_key=self.api_key, max_retries=0),
+            )
+        client = self._client
         agent = client.as_agent(
             name="VTuberReadingResearch"
             if "ReadingResearchAgent" in instructions

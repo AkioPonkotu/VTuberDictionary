@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+from collections.abc import Mapping
 from typing import Any, Protocol
 
 from pydantic import BaseModel
@@ -83,16 +84,43 @@ class AgentFrameworkJsonRunner:
                 # runtime dependency of this module's import surface.
                 return await agent.run(prompt, options={"response_format": response_model})  # type: ignore[attr-defined]
             except Exception as exc:
-                status = getattr(exc, "status_code", None)
+                status, retry_after = AgentFrameworkJsonRunner._retry_details(exc)
                 if status not in {429, 503} or attempt == 2:
                     raise
-                headers = getattr(getattr(exc, "response", None), "headers", {})
-                try:
-                    retry_after = float(headers.get("Retry-After", 0))
-                except (AttributeError, TypeError, ValueError):
-                    retry_after = 0.0
                 await asyncio.sleep(max(retry_after, 2**attempt + random.random()))
         raise AssertionError("unreachable")
+
+    @staticmethod
+    def _retry_details(exc: Exception) -> tuple[int | None, float]:
+        """Extract retry metadata from SDK errors wrapped by Agent Framework."""
+        pending: list[BaseException] = [exc]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            status = getattr(current, "status_code", None)
+            headers = getattr(getattr(current, "response", None), "headers", {})
+            if status in {429, 503}:
+                return status, AgentFrameworkJsonRunner._retry_after(headers)
+            for linked in (current.__cause__, current.__context__):
+                if linked is not None:
+                    pending.append(linked)
+            pending.extend(value for value in current.args if isinstance(value, BaseException))
+        return None, 0.0
+
+    @staticmethod
+    def _retry_after(headers: object) -> float:
+        if not isinstance(headers, Mapping):
+            return 0.0
+        try:
+            milliseconds = headers.get("retry-after-ms")
+            if milliseconds is not None:
+                return max(0.0, float(milliseconds) / 1000)
+            return max(0.0, float(headers.get("Retry-After", 0)))
+        except (TypeError, ValueError):
+            return 0.0
 
 
 class MissingOpenAICredentials:

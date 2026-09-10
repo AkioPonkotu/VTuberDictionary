@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-vtuber-dictionary = "vtuber_dictionary.cli:main"
+vtuber-dictionary = "vtuber_dictionary.presentation.cli:main"
 
 [build-system]
 requires = ["hatchling>=1.27,<2"]

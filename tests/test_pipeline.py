@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from vtuber_dictionary import repository
 from vtuber_dictionary.agency_source import AgencyPageTalentSource
 from vtuber_dictionary.agents import ReadingResearchAgent, VerificationAgent
 from vtuber_dictionary.dictionary import DictionaryCompiler, MacOsImeExporter, MicrosoftImeExporter
@@ -29,6 +28,7 @@ from vtuber_dictionary.filtering import (
     KatakanaOrLatinNameFilter,
     ThresholdFilter,
 )
+from vtuber_dictionary.infrastructure import persistence as repository
 from vtuber_dictionary.platforms import (
     AuthenticationError,
     CombinedPlatformClient,

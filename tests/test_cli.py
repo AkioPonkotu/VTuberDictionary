@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from vtuber_dictionary import cli
+from vtuber_dictionary.presentation import cli
 
 
 @pytest.mark.parametrize(

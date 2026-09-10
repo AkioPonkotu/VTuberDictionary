@@ -201,4 +201,16 @@ flowchart TB
     publish --> macos["dist/vtuber_dictionary_macos.csv<br/>macOS 日本語入力"]
 ```
 
-`update` は `discover` の後に `process` を実行します。`discover` と `process` は個別にも実行でき、GitHub Actions では発見結果をコミットしてから処理するため、中断後も候補を再利用できます。`domain.py` は外部サービスから独立したデータ構造です。HTTP API と Agent は protocol/adapter を介し、テストでは fake に置換します。YouTube/Twitch の規模判定は通常の Python コードと公式 API の値だけで行い、LLM には委ねません。
+`update` は `discover` の後に `process` を実行します。`discover` と `process` は個別にも実行でき、GitHub Actions では発見結果をコミットしてから処理するため、中断後も候補を再利用できます。
+
+ソースコードは Clean Architecture の依存方向に沿って分けています。
+
+```text
+src/vtuber_dictionary/
+  domain/           Entity と決定的な業務ルール
+  application/      ユースケースと外部依存の Protocol（ポート）
+  infrastructure/   JSONL、HTTP API、Agent、IME 出力のアダプタ
+  presentation/     CLI と依存の組み立て
+```
+
+`application` は `domain` とポートだけに依存します。HTTP API と Agent は `infrastructure` のアダプタとして実装し、テストでは fake に置換します。移行期間中は、以前のフラットなモジュールパスも互換用の薄い再エクスポートとして維持します。YouTube/Twitch の規模判定は通常の Python コードと公式 API の値だけで行い、LLM には委ねません。

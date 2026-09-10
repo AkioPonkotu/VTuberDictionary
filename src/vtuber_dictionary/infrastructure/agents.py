@@ -124,7 +124,7 @@ class AgentFrameworkJsonRunner:
                     attempt += 1
                     continue
                 if (
-                    status not in {429, 500, 503}
+                    status not in {429, 500, 502, 503}
                     and not AgentFrameworkJsonRunner._is_connection_error(exc)
                 ) or loop.time() >= deadline:
                     raise
@@ -165,7 +165,7 @@ class AgentFrameworkJsonRunner:
             seen.add(id(current))
             status = getattr(current, "status_code", None)
             headers = getattr(getattr(current, "response", None), "headers", {})
-            if status in {429, 503}:
+            if status in {429, 500, 502, 503}:
                 return status, AgentFrameworkJsonRunner._retry_after(headers)
             for linked in (current.__cause__, current.__context__):
                 if linked is not None:

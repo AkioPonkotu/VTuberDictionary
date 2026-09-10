@@ -28,10 +28,19 @@ class AgentFrameworkJsonRunner:
     execution environment as documented in the README.
     """
 
-    def __init__(self, api_key: str, model: str, max_concurrency: int = 2) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        max_concurrency: int = 2,
+        min_request_interval_seconds: float = 0.0,
+    ) -> None:
         self.api_key, self.model = api_key, model
         self._requests = asyncio.Semaphore(max_concurrency)
         self._client: Any | None = None
+        self._min_request_interval_seconds = min_request_interval_seconds
+        self._request_schedule_lock = asyncio.Lock()
+        self._next_request_at = 0.0
 
     async def run_json(
         self, instructions: str, prompt: str, response_model: type[BaseModel]
@@ -74,21 +83,40 @@ class AgentFrameworkJsonRunner:
             return value.model_dump_json()
         return str(getattr(response, "text", response))
 
-    @staticmethod
     async def _run_with_backoff(
+        self,
         agent: object, prompt: str, response_model: type[BaseModel]
     ) -> object:
         for attempt in range(3):
             try:
                 # Agent Framework's concrete agent type is intentionally not a
                 # runtime dependency of this module's import surface.
+                await self._wait_for_request_slot()
                 return await agent.run(prompt, options={"response_format": response_model})  # type: ignore[attr-defined]
             except Exception as exc:
                 status, retry_after = AgentFrameworkJsonRunner._retry_details(exc)
                 if status not in {429, 503} or attempt == 2:
                     raise
+                await self._defer_requests(retry_after)
                 await asyncio.sleep(max(retry_after, 2**attempt + random.random()))
         raise AssertionError("unreachable")
+
+    async def _wait_for_request_slot(self) -> None:
+        """Reserve a paced request start without holding the lock while sleeping."""
+        async with self._request_schedule_lock:
+            now = asyncio.get_running_loop().time()
+            scheduled_at = max(now, self._next_request_at)
+            self._next_request_at = scheduled_at + self._min_request_interval_seconds
+        if delay := scheduled_at - now:
+            await asyncio.sleep(delay)
+
+    async def _defer_requests(self, delay: float) -> None:
+        if delay <= 0:
+            return
+        async with self._request_schedule_lock:
+            self._next_request_at = max(
+                self._next_request_at, asyncio.get_running_loop().time() + delay
+            )
 
     @staticmethod
     def _retry_details(exc: Exception) -> tuple[int | None, float]:

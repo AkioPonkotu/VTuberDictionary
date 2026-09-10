@@ -138,3 +138,13 @@ def test_openai_concurrency_environment_bounds(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("OPENAI_CONCURRENCY", "129")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_openai_request_interval_environment_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_MIN_REQUEST_INTERVAL_SECONDS", raising=False)
+    assert Settings(_env_file=None).openai_min_request_interval_seconds == 0
+    monkeypatch.setenv("OPENAI_MIN_REQUEST_INTERVAL_SECONDS", "0.5")
+    assert Settings(_env_file=None).openai_min_request_interval_seconds == 0.5
+    monkeypatch.setenv("OPENAI_MIN_REQUEST_INTERVAL_SECONDS", "-0.1")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)

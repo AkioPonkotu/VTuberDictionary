@@ -98,6 +98,7 @@ async def process(settings: Settings, processing_sources: set[str] | None = None
             settings.openai_api_key.get_secret_value(),
             settings.openai_model,
             max_concurrency=settings.openai_concurrency,
+            min_request_interval_seconds=settings.openai_min_request_interval_seconds,
         )
         researcher = ReadingResearchAgent(runner)
         verifier = VerificationAgent(runner)

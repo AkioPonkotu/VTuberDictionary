@@ -42,7 +42,8 @@ async def test_runner_retries_a_rate_limit_wrapped_by_agent_framework(
     monkeypatch.setattr(asyncio, "sleep", record_sleep)
     agent = Agent()
 
-    assert await AgentFrameworkJsonRunner._run_with_backoff(agent, "prompt", _ResponseModel)
+    runner = AgentFrameworkJsonRunner("test-key", "test-model")
+
+    assert await runner._run_with_backoff(agent, "prompt", _ResponseModel)
     assert agent.calls == 2
-    assert len(delays) == 1
-    assert delays[0] >= 1
+    assert any(delay >= 1 for delay in delays)

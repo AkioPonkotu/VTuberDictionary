@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # allowed to be higher than the normal worker count for a catch-up run.
     processing_concurrency: int = Field(default=6, ge=1, le=128)
     openai_concurrency: int = Field(default=2, ge=1, le=128)
+    openai_min_request_interval_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
     data_dir: Path = Path("data")
     dist_dir: Path = Path("dist")
 

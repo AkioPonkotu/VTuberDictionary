@@ -33,12 +33,16 @@ class AgentFrameworkJsonRunner:
         api_key: str,
         model: str,
         max_concurrency: int = 2,
-        min_request_interval_seconds: float = 0.0,
+        min_request_interval_seconds: float = 1.0,
+        max_output_tokens: int = 384,
+        rate_limit_retry_seconds: float = 900.0,
     ) -> None:
         self.api_key, self.model = api_key, model
         self._requests = asyncio.Semaphore(max_concurrency)
         self._client: Any | None = None
         self._min_request_interval_seconds = min_request_interval_seconds
+        self._max_output_tokens = max_output_tokens
+        self._rate_limit_retry_seconds = rate_limit_retry_seconds
         self._request_schedule_lock = asyncio.Lock()
         self._next_request_at = 0.0
 
@@ -74,10 +78,10 @@ class AgentFrameworkJsonRunner:
             instructions=instructions,
             tools=[],
         )
-        # Research and verification are serial per candidate in the pipeline,
-        # but this shared gate limits simultaneous calls across candidates.
-        async with self._requests:
-            response = await self._run_with_backoff(agent, prompt, response_model)
+        # Research and verification are serial per candidate in the pipeline.
+        # ``_run_with_backoff`` acquires the shared gate for each individual
+        # network attempt, rather than holding a slot while a 429 is sleeping.
+        response = await self._run_with_backoff(agent, prompt, response_model)
         value = getattr(response, "value", None)
         if isinstance(value, BaseModel):
             return value.model_dump_json()
@@ -87,19 +91,38 @@ class AgentFrameworkJsonRunner:
         self,
         agent: object, prompt: str, response_model: type[BaseModel]
     ) -> object:
-        for attempt in range(3):
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._rate_limit_retry_seconds
+        attempt = 0
+        while True:
             try:
                 # Agent Framework's concrete agent type is intentionally not a
                 # runtime dependency of this module's import surface.
                 await self._wait_for_request_slot()
-                return await agent.run(prompt, options={"response_format": response_model})  # type: ignore[attr-defined]
+                async with self._requests:
+                    return await agent.run(  # type: ignore[attr-defined]
+                        prompt,
+                        options={
+                            "response_format": response_model,
+                            # These compact, schema-constrained records do not
+                            # need the framework's 1,000-token default output
+                            # reservation.  Lowering it prevents a large
+                            # output budget from consuming the TPM allowance.
+                            "max_tokens": self._max_output_tokens,
+                            "verbosity": "low",
+                        },
+                    )
             except Exception as exc:
                 status, retry_after = AgentFrameworkJsonRunner._retry_details(exc)
-                if status not in {429, 503} or attempt == 2:
+                if status not in {429, 503} or loop.time() >= deadline:
                     raise
-                await self._defer_requests(retry_after)
-                await asyncio.sleep(max(retry_after, 2**attempt + random.random()))
-        raise AssertionError("unreachable")
+                # The service's hint is a lower bound.  A shared deferment and
+                # jittered backoff let the entire request stream drain instead
+                # of retrying a burst three times and aborting the checkpoint.
+                retry_delay = max(retry_after, min(30.0, 2**attempt + random.random()))
+                await self._defer_requests(retry_delay)
+                await asyncio.sleep(retry_delay)
+                attempt += 1
 
     async def _wait_for_request_slot(self) -> None:
         """Reserve a paced request start without holding the lock while sleeping."""

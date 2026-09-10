@@ -142,9 +142,24 @@ def test_openai_concurrency_environment_bounds(monkeypatch: pytest.MonkeyPatch) 
 
 def test_openai_request_interval_environment_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_MIN_REQUEST_INTERVAL_SECONDS", raising=False)
-    assert Settings(_env_file=None).openai_min_request_interval_seconds == 0
+    assert Settings(_env_file=None).openai_min_request_interval_seconds == 1
     monkeypatch.setenv("OPENAI_MIN_REQUEST_INTERVAL_SECONDS", "0.5")
     assert Settings(_env_file=None).openai_min_request_interval_seconds == 0.5
     monkeypatch.setenv("OPENAI_MIN_REQUEST_INTERVAL_SECONDS", "-0.1")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_openai_output_and_rate_limit_recovery_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_MAX_OUTPUT_TOKENS", raising=False)
+    monkeypatch.delenv("OPENAI_RATE_LIMIT_RETRY_SECONDS", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.openai_max_output_tokens == 384
+    assert settings.openai_rate_limit_retry_seconds == 900
+    monkeypatch.setenv("OPENAI_MAX_OUTPUT_TOKENS", "127")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+    monkeypatch.setenv("OPENAI_MAX_OUTPUT_TOKENS", "384")
+    monkeypatch.setenv("OPENAI_RATE_LIMIT_RETRY_SECONDS", "0")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)

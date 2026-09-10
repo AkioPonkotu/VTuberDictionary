@@ -389,6 +389,32 @@ async def test_http_client_classifies_authentication_failure() -> None:
     await client.aclose()
 
 
+@pytest.mark.asyncio
+async def test_http_client_retries_transient_read_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    attempts = 0
+
+    async def transport(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ReadError("connection reset", request=request)
+        return httpx.Response(200, request=request, json={"ok": True})
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("vtuber_dictionary.platforms.asyncio.sleep", no_wait)
+    client = RetryingHttpClient(retries=2)
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+
+    assert await client.get_json("https://example.test") == {"ok": True}
+    assert attempts == 2
+    await client.aclose()
+
+
 def test_http_client_follows_official_site_redirects() -> None:
     client = RetryingHttpClient()
     assert client.client.follow_redirects

@@ -106,6 +106,12 @@ class RetryingHttpClient:
             except httpx.TimeoutException as exc:
                 error = ApiError(f"request timed out: {url}", retryable=True)
                 error.__cause__ = exc
+            except httpx.RequestError as exc:
+                # Connection resets and incomplete reads are transient on
+                # public search endpoints.  They need the same bounded retry
+                # path as timeouts rather than cancelling the whole pipeline.
+                error = ApiError(f"request failed: {url}", retryable=True)
+                error.__cause__ = exc
             except ApiError as exc:
                 error = exc
             if not error.retryable or attempt == self.retries - 1:

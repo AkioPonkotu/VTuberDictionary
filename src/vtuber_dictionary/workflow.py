@@ -1,4 +1,4 @@
-"""A durable, ordered pipeline with parallel external I/O workers."""
+"""A durable pipeline with parallel external I/O and candidate-local retries."""
 
 from __future__ import annotations
 
@@ -309,7 +309,7 @@ class Pipeline:
                     group.create_task(self._worker(jobs, results, saver, stats))
                     for _ in range(self.settings.processing_concurrency)
                 ]
-                additions = await self._adopt_in_order(selected, jobs, results, saver, stats)
+                additions = await self._adopt_as_ready(selected, jobs, results, saver, stats)
                 for _ in workers:
                     await jobs.put(None)
                 await asyncio.gather(*workers)
@@ -323,7 +323,7 @@ class Pipeline:
             self._publish_entries(self.entries.all())
         return additions
 
-    async def _adopt_in_order(
+    async def _adopt_as_ready(
         self,
         selected: list[Candidate],
         jobs: asyncio.Queue[_Work | None],
@@ -356,7 +356,7 @@ class Pipeline:
         existing = retained
 
         additions = 0
-        # Resume durable publication before any network access, in snapshot order.
+        # Resume durable publication before any network access.
         for candidate in selected:
             if candidate.canonical_id in excluded_ids or candidate.pending_entry is None:
                 continue
@@ -386,64 +386,44 @@ class Pipeline:
                 )
             )
         stats.queued = len(snapshot)
-        ready: dict[int, WorkerResult] = {}
-        next_index = 0
-        while next_index < len(snapshot):
+        for _ in range(len(snapshot)):
             result = await results.get()
             stats.in_flight = max(0, stats.in_flight - 1)
             stats.record_timings(result.timings)
-            ready[result.index] = result
-            stats.ready_to_commit = len(ready)
-            while (ordered := ready.pop(next_index, None)) is not None:
-                stats.ready_to_commit = len(ready)
-                if ordered.rejected or ordered.skipped:
-                    next_index += 1
-                    stats.processed += 1
-                    continue
-                if ordered.research is None or ordered.verification is None:
-                    raise RuntimeError("worker completed without an agent result")
-                prior = [
-                    entry
-                    for entry in existing
-                    if entry.canonical_id != ordered.candidate.canonical_id
-                ]
-                entry, reason = self.validator.validate(
-                    ordered.candidate, ordered.research, ordered.verification, prior
-                )
-                if entry is None and ordered.candidate.research_attempts < MAX_RESEARCH_ATTEMPTS:
-                    retry_reason = self._retry_reason(reason, ordered.verification)
-                    candidate = await saver.save(
-                        SaveEvent(
-                            "retry_saved",
-                            ordered.candidate.canonical_id,
-                            attempt_number=ordered.candidate.research_attempts,
-                            reason=retry_reason,
-                        )
-                    )
-                    await jobs.put(_Work(next_index, candidate))
-                    stats.queued += 1
-                    break
-                if entry is None:
-                    await saver.save(
-                        SaveEvent(
-                            "review_required",
-                            ordered.candidate.canonical_id,
-                            reason=ordered.candidate.retry_reason
-                            or self._retry_reason(reason, ordered.verification),
-                        )
-                    )
-                else:
-                    await saver.save(
-                        SaveEvent(
-                            "pending_entry_saved", ordered.candidate.canonical_id, entry=entry
-                        )
-                    )
-                    self._publish_entry(existing, entry)
-                    existing = self.entries.all()
-                    await saver.save(SaveEvent("published", ordered.candidate.canonical_id))
-                    additions += 1
-                next_index += 1
+            stats.ready_to_commit = results.qsize()
+            if result.rejected or result.skipped:
                 stats.processed += 1
+                continue
+            if result.research is None or result.verification is None:
+                raise RuntimeError("worker completed without an agent result")
+            prior = [
+                entry
+                for entry in existing
+                if entry.canonical_id != result.candidate.canonical_id
+            ]
+            entry, reason = self.validator.validate(
+                result.candidate, result.research, result.verification, prior
+            )
+            if entry is None:
+                # Agent-output failures have already been retried by the worker.
+                # Only entry conflicts and an exhausted candidate reach this point.
+                await saver.save(
+                    SaveEvent(
+                        "review_required",
+                        result.candidate.canonical_id,
+                        reason=result.candidate.retry_reason
+                        or self._retry_reason(reason, result.verification),
+                    )
+                )
+            else:
+                await saver.save(
+                    SaveEvent("pending_entry_saved", result.candidate.canonical_id, entry=entry)
+                )
+                self._publish_entry(existing, entry)
+                existing = self.entries.all()
+                await saver.save(SaveEvent("published", result.candidate.canonical_id))
+                additions += 1
+            stats.processed += 1
         return additions
 
     async def _worker(
@@ -485,13 +465,22 @@ class Pipeline:
             and latest.verification_raw_json
             and not latest.failure_reason
         ):
-            return candidate, _WorkerOutcome(
-                ResearchResult.model_validate_json(latest.research_raw_json).model_copy(
-                    update={"raw_json": latest.research_raw_json}
-                ),
-                VerificationResult.model_validate_json(latest.verification_raw_json).model_copy(
-                    update={"raw_json": latest.verification_raw_json}
-                ),
+            research = ResearchResult.model_validate_json(latest.research_raw_json).model_copy(
+                update={"raw_json": latest.research_raw_json}
+            )
+            verification = VerificationResult.model_validate_json(
+                latest.verification_raw_json
+            ).model_copy(update={"raw_json": latest.verification_raw_json})
+            _, reason = self.validator.validate(candidate, research, verification, [])
+            if reason is None or candidate.research_attempts >= MAX_RESEARCH_ATTEMPTS:
+                return candidate, _WorkerOutcome(research, verification)
+            candidate = await saver.save(
+                SaveEvent(
+                    "retry_saved",
+                    candidate.canonical_id,
+                    attempt_number=latest.number,
+                    reason=self._retry_reason(reason, verification),
+                )
             )
         platform_started = time.monotonic()
         metrics = await self.platforms.audience_metrics(candidate)
@@ -511,74 +500,93 @@ class Pipeline:
         )
         sources_seconds = time.monotonic() - sources_started
         name_filter = KatakanaOrLatinNameFilter()
-        if latest and latest.research_raw_json and not latest.verification_raw_json:
-            attempt_number = latest.number
-            research = ResearchResult.model_validate_json(latest.research_raw_json).model_copy(
-                update={"raw_json": latest.research_raw_json}
+        research_seconds = 0.0
+        verification_seconds = 0.0
+        while True:
+            latest = candidate.agent_attempts[-1] if candidate.agent_attempts else None
+            if latest and latest.research_raw_json and not latest.verification_raw_json:
+                attempt_number = latest.number
+                research = ResearchResult.model_validate_json(latest.research_raw_json).model_copy(
+                    update={"raw_json": latest.research_raw_json}
+                )
+            else:
+                attempt_number = candidate.research_attempts + 1
+                candidate = await saver.save(
+                    SaveEvent(
+                        "attempt_started", candidate.canonical_id, attempt_number=attempt_number
+                    )
+                )
+                research_started = time.monotonic()
+                research = await self.researcher.research(
+                    candidate.model_copy(deep=True), metrics, sources
+                )
+                research_seconds += time.monotonic() - research_started
+                candidate = await saver.save(
+                    SaveEvent(
+                        "research_saved",
+                        candidate.canonical_id,
+                        attempt_number=attempt_number,
+                        raw_json=research.raw_json,
+                    )
+                )
+            if research.canonical_name and name_filter.excludes_name(research.canonical_name):
+                await saver.save(SaveEvent("candidate_rejected", candidate.canonical_id))
+                return candidate, _WorkerOutcome(
+                    rejected=True,
+                    timings=_StageTimings(
+                        platform=platform_seconds,
+                        sources=sources_seconds,
+                        research=research_seconds,
+                        verification=verification_seconds,
+                    ),
+                )
+            verification_started = time.monotonic()
+            verification = await self.verifier.verify(
+                candidate.model_copy(deep=True), research, metrics, sources
             )
-            research_seconds = 0.0
-        else:
-            attempt_number = candidate.research_attempts + 1
-            candidate = await saver.save(
-                SaveEvent("attempt_started", candidate.canonical_id, attempt_number=attempt_number)
-            )
-            research_started = time.monotonic()
-            research = await self.researcher.research(
-                candidate.model_copy(deep=True), metrics, sources
-            )
-            research_seconds = time.monotonic() - research_started
+            verification_seconds += time.monotonic() - verification_started
             candidate = await saver.save(
                 SaveEvent(
-                    "research_saved",
+                    "verification_saved",
                     candidate.canonical_id,
                     attempt_number=attempt_number,
-                    raw_json=research.raw_json,
+                    raw_json=verification.raw_json,
                 )
             )
-        if research.canonical_name and name_filter.excludes_name(research.canonical_name):
-            await saver.save(SaveEvent("candidate_rejected", candidate.canonical_id))
-            return candidate, _WorkerOutcome(
-                rejected=True,
-                timings=_StageTimings(
-                    platform=platform_seconds,
-                    sources=sources_seconds,
-                    research=research_seconds,
-                ),
+            if (
+                verification.canonical_name
+                and name_filter.excludes_name(verification.canonical_name)
+            ):
+                await saver.save(SaveEvent("candidate_rejected", candidate.canonical_id))
+                return candidate, _WorkerOutcome(
+                    rejected=True,
+                    timings=_StageTimings(
+                        platform=platform_seconds,
+                        sources=sources_seconds,
+                        research=research_seconds,
+                        verification=verification_seconds,
+                    ),
+                )
+            _, reason = self.validator.validate(candidate, research, verification, [])
+            if reason is None or candidate.research_attempts >= MAX_RESEARCH_ATTEMPTS:
+                return candidate, _WorkerOutcome(
+                    research,
+                    verification,
+                    timings=_StageTimings(
+                        platform=platform_seconds,
+                        sources=sources_seconds,
+                        research=research_seconds,
+                        verification=verification_seconds,
+                    ),
+                )
+            candidate = await saver.save(
+                SaveEvent(
+                    "retry_saved",
+                    candidate.canonical_id,
+                    attempt_number=attempt_number,
+                    reason=self._retry_reason(reason, verification),
+                )
             )
-        verification_started = time.monotonic()
-        verification = await self.verifier.verify(
-            candidate.model_copy(deep=True), research, metrics, sources
-        )
-        verification_seconds = time.monotonic() - verification_started
-        candidate = await saver.save(
-            SaveEvent(
-                "verification_saved",
-                candidate.canonical_id,
-                attempt_number=attempt_number,
-                raw_json=verification.raw_json,
-            )
-        )
-        if verification.canonical_name and name_filter.excludes_name(verification.canonical_name):
-            await saver.save(SaveEvent("candidate_rejected", candidate.canonical_id))
-            return candidate, _WorkerOutcome(
-                rejected=True,
-                timings=_StageTimings(
-                    platform=platform_seconds,
-                    sources=sources_seconds,
-                    research=research_seconds,
-                    verification=verification_seconds,
-                ),
-            )
-        return candidate, _WorkerOutcome(
-            research,
-            verification,
-            timings=_StageTimings(
-                platform=platform_seconds,
-                sources=sources_seconds,
-                research=research_seconds,
-                verification=verification_seconds,
-            ),
-        )
 
     def _publish_entry(self, existing: list[DictionaryEntry], entry: DictionaryEntry) -> None:
         by_identity = {item.canonical_id: item for item in existing}

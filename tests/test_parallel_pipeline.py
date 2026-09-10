@@ -40,7 +40,7 @@ class _RecordingEntries(EntryRepository):
 
 
 @pytest.mark.asyncio
-async def test_parallel_workers_are_committed_in_snapshot_order(tmp_path: Path) -> None:
+async def test_parallel_workers_are_committed_when_they_finish(tmp_path: Path) -> None:
     active = 0
     maximum = 0
     calls: list[str] = []
@@ -115,7 +115,7 @@ async def test_parallel_workers_are_committed_in_snapshot_order(tmp_path: Path) 
     assert await pipeline.run() == 2
     assert maximum == 2
     assert calls.index(f"research:{name_b}") < calls.index(f"verify:{name_a}")
-    assert entries.publications == [[a.canonical_id], [a.canonical_id, b.canonical_id]]
+    assert entries.publications == [[b.canonical_id], [b.canonical_id, a.canonical_id]]
 
 
 def test_processing_concurrency_environment_bounds(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -183,7 +183,13 @@ class AgentFrameworkJsonRunner:
             if id(current) in seen:
                 continue
             seen.add(id(current))
-            if type(current).__name__ in {"APIConnectionError", "ReadError", "ConnectError"}:
+            if type(current).__name__ in {
+                "APIConnectionError",
+                "ReadError",
+                "ConnectError",
+                "APITimeoutError",
+                "ReadTimeout",
+            }:
                 return True
             for linked in (current.__cause__, current.__context__):
                 if linked is not None:

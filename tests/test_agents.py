@@ -74,6 +74,30 @@ async def test_runner_retries_a_wrapped_connection_error(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_runner_retries_a_wrapped_api_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    class APITimeoutError(Exception):
+        pass
+
+    class Agent:
+        calls = 0
+
+        async def run(self, *_: object, **__: object) -> object:
+            self.calls += 1
+            if self.calls == 1:
+                raise Exception("wrapped", APITimeoutError())
+            return type("Valid", (), {"text": '{"value":"ok"}'})()
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+    agent = Agent()
+    runner = AgentFrameworkJsonRunner("test-key", "test-model")
+    assert await runner._run_with_backoff(agent, "prompt", _ResponseModel)
+    assert agent.calls == 2
+
+
+@pytest.mark.asyncio
 async def test_runner_retries_a_wrapped_bad_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     class BadGateway(Exception):
         status_code = 502

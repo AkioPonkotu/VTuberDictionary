@@ -175,11 +175,12 @@ jobs:
               --notes "Automated dictionary update from agency discovery."
           fi
           for artifact in vtuber_dictionary.tsv vtuber_dictionary_msime.txt vtuber_dictionary_macos.csv; do
-            asset="$(mktemp)"
+            asset_dir="$(mktemp -d)"
+            asset="${asset_dir}/${artifact}"
             git show "${artifact_sha}:dist/${artifact}" > "$asset"
             if ! gh release view "$tag" --json assets --jq '.assets[].name' | grep -Fx "$artifact"; then
               gh release upload "$tag" "${asset}#${artifact}"
             fi
-            rm -f "$asset"
+            rm -rf "$asset_dir"
           done
           gh release edit "$tag" --draft=false

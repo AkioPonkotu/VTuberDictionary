@@ -462,6 +462,21 @@ def test_candidate_repository_batch_upserts_once(tmp_path: Path) -> None:
     assert stored[0].canonical_id == stored[1].canonical_id
 
 
+def test_jsonl_repository_preserves_unicode_line_separators_within_values(
+    tmp_path: Path,
+) -> None:
+    repo = CandidateRepository(tmp_path / "candidates.jsonl")
+    candidate = Candidate(
+        display_name="separator",
+        research_raw_json='{"claim":"before\u2028after\u2029end"}',
+    )
+
+    repo.replace([candidate])
+
+    assert "\u2028" in repo.path.read_text("utf-8")
+    assert repo.all() == [candidate]
+
+
 def test_ambiguous_identity_is_review_required(tmp_path: Path) -> None:
     repo = CandidateRepository(tmp_path / "candidates.jsonl")
     repo.upsert(Candidate(display_name="A", youtube_channel_id="youtube-a"))

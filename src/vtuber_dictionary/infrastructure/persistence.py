@@ -19,7 +19,10 @@ def _read_jsonl[T: BaseModel](path: Path, model: type[T]) -> list[T]:
     if not path.exists():
         return []
     return [
-        model.model_validate_json(line) for line in path.read_text("utf-8").splitlines() if line
+        # JSON Lines uses physical LF characters as record separators.  Do not
+        # use str.splitlines(): U+2028 and U+2029 are valid within JSON string
+        # values but splitlines() would treat them as separate records.
+        model.model_validate_json(line) for line in path.read_text("utf-8").split("\n") if line
     ]
 
 

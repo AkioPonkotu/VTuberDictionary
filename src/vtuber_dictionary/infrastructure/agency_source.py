@@ -147,7 +147,19 @@ class AgencyPageTalentSource:
         self.http = http or RetryingHttpClient()
 
     async def list_talents(self, agency: Agency) -> list[Candidate]:
-        body = await self.http.get_text(agency.talent_list_url)
+        try:
+            body = await self.http.get_text(agency.talent_list_url)
+        except ApiError as error:
+            # Agency sites are independent public services.  A transient
+            # failure after the HTTP client's bounded retries must not abort
+            # discovery for every other agency.
+            LOG.warning(
+                "agency_roster_unavailable agency=%s url=%s error=%s",
+                agency.name,
+                agency.talent_list_url,
+                type(error).__name__,
+            )
+            return []
         profiles = self._profile_links(agency, self._links(body))
         profiles = self._merge_profile_links(profiles, self._next_data_profile_links(agency, body))
         if not profiles:

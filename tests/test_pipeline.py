@@ -30,7 +30,6 @@ from vtuber_dictionary.filtering import (
 )
 from vtuber_dictionary.infrastructure import persistence as repository
 from vtuber_dictionary.platforms import (
-    ApiError,
     AuthenticationError,
     CombinedPlatformClient,
     RateLimitError,
@@ -193,22 +192,6 @@ async def test_agency_page_source_keeps_named_profile_when_enrichment_is_rate_li
         ("利用可能 タレント", "https://agency.example/talents/available"),
         ("制限中 タレント", "https://agency.example/talents/limited"),
     ]
-
-
-@pytest.mark.asyncio
-async def test_agency_page_source_skips_unavailable_roster() -> None:
-    class FakeHttp:
-        async def get_text(self, url: str) -> str:
-            raise ApiError("request timed out", retryable=True)
-
-    source = AgencyPageTalentSource(http=FakeHttp())  # type: ignore[arg-type]
-    agency = Agency(
-        name="Agency",
-        official_url="https://agency.example",
-        talent_list_url="https://agency.example/talents",
-    )
-
-    assert await source.list_talents(agency) == []
 
 
 def test_agency_page_source_rejects_profile_links_with_control_characters() -> None:

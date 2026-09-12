@@ -102,7 +102,20 @@ jobs:
           TWITCH_DISCOVERY_LANGUAGE: ${{ vars.TWITCH_DISCOVERY_LANGUAGE || 'ja' }}
           TWITCH_DISCOVERY_TAG: ${{ vars.TWITCH_DISCOVERY_TAG || 'VTuber' }}
           TWITCH_DISCOVERY_MAX_PAGES: ${{ vars.TWITCH_DISCOVERY_MAX_PAGES || '20' }}
-        run: uv run vtuber-dictionary discover --source agency
+        run: |
+          # A complete discovery pass is retried once after a cooldown.  This
+          # preserves data completeness: an agency is never silently skipped
+          # if its official roster is temporarily unreachable.
+          for attempt in 1 2; do
+            if uv run vtuber-dictionary discover --source agency; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              exit 1
+            fi
+            echo "::warning::Agency discovery failed; retrying the complete pass in 60 seconds."
+            sleep 60
+          done
       - name: Checkpoint discovered candidates before research
         shell: bash
         run: |

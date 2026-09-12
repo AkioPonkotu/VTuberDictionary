@@ -1,7 +1,9 @@
 name: Update dictionary from Twitch
 
 on:
-  # Periodic execution is temporarily paused. Manual dispatch remains available.
+  # Run every four hours (GitHub Actions cron uses UTC).
+  schedule:
+    - cron: "0 */4 * * *"
   workflow_dispatch:
 
 permissions:

@@ -19,6 +19,10 @@ from ..domain import (
 )
 
 
+class AccessDeniedError(Exception):
+    """A public source rejected access and should be retried in a later run."""
+
+
 class CandidateStore(Protocol):
     path: Path
 

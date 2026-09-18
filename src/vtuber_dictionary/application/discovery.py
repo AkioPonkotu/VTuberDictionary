@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 
 from ..domain import Agency, Candidate, now
 from .ports import (
+    AccessDeniedError,
     AgencyStore,
     AgencyTalentSource,
     CandidateStore,
     TwitchDiscoveryCheckpointStore,
     TwitchStreamSource,
 )
+
+LOG = logging.getLogger(__name__)
 
 
 class AgencyDiscovery:
@@ -26,7 +30,18 @@ class AgencyDiscovery:
     ) -> list[Candidate]:
         found: list[Candidate] = []
         for agency in agencies:
-            candidates = await self.source.list_talents(agency)
+            try:
+                candidates = await self.source.list_talents(agency)
+            except AccessDeniedError:
+                # Public rosters can return 401/403 because of temporary WAF
+                # rules or runner IP restrictions.  Leave last_checked_at
+                # unchanged so this active agency is retried on the next run.
+                LOG.warning(
+                    "agency_discovery_access_denied agency=%s url=%s retry_on_next_run=true",
+                    agency.name,
+                    agency.talent_list_url,
+                )
+                continue
             self._discard_shared_platform_links(candidates)
             for candidate in candidates:
                 candidate.agency = candidate.agency or agency.name

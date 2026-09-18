@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..application.ports import TwitchStreamPage
+from ..application.ports import AccessDeniedError, TwitchStreamPage
 from ..domain import AudienceMetrics, Candidate
 
 LOG = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class ApiError(RuntimeError):
         self.retry_after = retry_after
 
 
-class AuthenticationError(ApiError):
+class AuthenticationError(ApiError, AccessDeniedError):
     """The credentials lack access or are invalid."""
 
 

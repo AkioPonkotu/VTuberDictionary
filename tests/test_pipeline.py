@@ -118,6 +118,31 @@ async def test_agency_discovery_marks_candidates_without_verifying() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agency_discovery_retries_access_denied_agency_on_next_run(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class AccessDeniedAgencySource:
+        async def list_talents(self, agency: Agency) -> list[Candidate]:
+            if agency.name == "Blocked":
+                raise AuthenticationError("authentication failed")
+            return [Candidate(display_name="公式タレント")]
+
+    blocked = Agency(
+        name="Blocked", official_url="https://blocked.example", talent_list_url="https://blocked.example/t"
+    )
+    available = Agency(
+        name="Available", official_url="https://available.example", talent_list_url="https://available.example/t"
+    )
+
+    found = await AgencyDiscovery(AccessDeniedAgencySource()).discover([blocked, available])
+
+    assert [candidate.agency for candidate in found] == ["Available"]
+    assert blocked.last_checked_at is None
+    assert available.last_checked_at is not None
+    assert "agency_discovery_access_denied agency=Blocked" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_agency_discovery_discards_shared_platform_links() -> None:
     class SharedChannelAgencySource:
         async def list_talents(self, agency: Agency) -> list[Candidate]:

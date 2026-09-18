@@ -42,6 +42,20 @@ class AgencyDiscovery:
                     agency.talent_list_url,
                 )
                 continue
+            except Exception as error:
+                # Each agency is an independent public source.  Network,
+                # server, parsing, and other source-specific failures must
+                # not prevent the remaining agencies from being discovered.
+                # Keep last_checked_at unchanged so the failed agency is
+                # retried on the next scheduled run.
+                LOG.warning(
+                    "agency_discovery_failed agency=%s url=%s error_type=%s retry_on_next_run=true",
+                    agency.name,
+                    agency.talent_list_url,
+                    type(error).__name__,
+                    exc_info=True,
+                )
+                continue
             self._discard_shared_platform_links(candidates)
             for candidate in candidates:
                 candidate.agency = candidate.agency or agency.name

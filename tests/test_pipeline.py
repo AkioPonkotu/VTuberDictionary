@@ -143,6 +143,36 @@ async def test_agency_discovery_retries_access_denied_agency_on_next_run(
 
 
 @pytest.mark.asyncio
+async def test_agency_discovery_continues_after_other_agency_source_errors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FailingAgencySource:
+        async def list_talents(self, agency: Agency) -> list[Candidate]:
+            if agency.name == "Unavailable":
+                raise RuntimeError("malformed upstream response")
+            return [Candidate(display_name="公式タレント")]
+
+    unavailable = Agency(
+        name="Unavailable",
+        official_url="https://unavailable.example",
+        talent_list_url="https://unavailable.example/t",
+    )
+    available = Agency(
+        name="Available",
+        official_url="https://available.example",
+        talent_list_url="https://available.example/t",
+    )
+
+    found = await AgencyDiscovery(FailingAgencySource()).discover([unavailable, available])
+
+    assert [candidate.agency for candidate in found] == ["Available"]
+    assert unavailable.last_checked_at is None
+    assert available.last_checked_at is not None
+    assert "agency_discovery_failed agency=Unavailable" in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_agency_discovery_discards_shared_platform_links() -> None:
     class SharedChannelAgencySource:
         async def list_talents(self, agency: Agency) -> list[Candidate]:

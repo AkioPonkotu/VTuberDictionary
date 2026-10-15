@@ -24,6 +24,7 @@
 あおいゆな,碧井ユナ,proper noun
 あおがせそらね,蒼ヶ瀬ソラネ,proper noun
 あおきかき,青木カーキ,proper noun
+あおきりお,碧輝りお,proper noun
 あおぎりえいと,青桐エイト,proper noun
 あおつきれみあ,青月レミア,proper noun
 あおとゆりな,碧音ゆりな,proper noun
@@ -74,6 +75,7 @@
 あのもん,あのもん,proper noun
 あのんれむ,綺音れむ,proper noun
 あまいひびき,甘井ひびき,proper noun
+あまうしろっぷ,天羽しろっぷ,proper noun
 あまえてん,天廻てん,proper noun
 あまえないよ,あまえないよ,proper noun
 あまかみこのみ,甘狼このみ,proper noun
@@ -156,6 +158,7 @@
 いちめろみかん,一夢音みかん,proper noun
 いっしきさすな,恚式沙朱七,proper noun
 いっしんふらん,壱神ふらん,proper noun
+いつかなつめ,五果なつめ,proper noun
 いつきさきょう,五木左京,proper noun
 いつきちせ,伊月知世,proper noun
 いなばはねる,因幡はねる,proper noun
@@ -335,6 +338,7 @@
 かぷりんこ,かぷりんこ,proper noun
 かみながたいが,神永タイガ,proper noun
 かみなりきゅぴ,神成きゅぴ,proper noun
+かみゆびかつや,神指かつや,proper noun
 かもみかもみ,鴨見カモミ,proper noun
 からすばこめまる,鴉羽米丸,proper noun
 かるあみるく,かるあみるく,proper noun
@@ -411,6 +415,7 @@
 くらげそら,海月そら,proper noun
 くらげるりがい,海月るりがい,proper noun
 くらっしゅ,くらっしゅ,proper noun
+くらむぴこ,倉夢ぴこ,proper noun
 くらもちめると,倉持めると,proper noun
 くりえいた,九里詠太,proper noun
 くりやまこりー,栗山コリー,proper noun
@@ -532,6 +537,7 @@
 ささら,紗々羅,proper noun
 ささらめい,裟々羅冥,proper noun
 さざなみとあ,漣とあ,proper noun
+さざめみのり,沙雨みのり,proper noun
 さつきほたる,咲月ほたる,proper noun
 さとうあにめ,佐藤あにめ,proper noun
 さとうしいく,佐藤しーく,proper noun
@@ -781,6 +787,7 @@
 つむぎやすい,紬希鵺すい,proper noun
 つゆりいろ,栗花落いろ,proper noun
 つゆりひお,つゆりひお,proper noun
+つるる,つるる,proper noun
 てぃるちゃんねる,てぃるちゃんねる,proper noun
 ていおんかさね,蹄音かさね,proper noun
 てちみや,てちみや,proper noun
@@ -899,6 +906,7 @@
 ねおぴんく,ねおぴんく,proper noun
 ねぎまぐろ,ネギまぐろ,proper noun
 ねぎまちゃん,ねぎまちゃん,proper noun
+ねぎりん,ねぎりん,proper noun
 ねけまる,ねけまる,proper noun
 ねこあいす,ねこあいす,proper noun
 ねこあちゃれ,猫愛ちゃれ,proper noun
@@ -951,6 +959,7 @@
 のなめっくす,のなめっくす,proper noun
 のののにに,野々乃にに,proper noun
 のらねこないす,野良猫ナイス,proper noun
+のらりねこみ,野良里猫美,proper noun
 のり,能能,proper noun
 のんだくれは,呑田クレハ,proper noun
 はいいろ,はい_いろ_,proper noun
@@ -991,6 +1000,7 @@
 はなみやかるた,花宮かるた,proper noun
 はなむらすい,花邑すい,proper noun
 はねうずみうねる,羽渦ミウネル,proper noun
+はねさきたや,羽咲たや,proper noun
 はねざかあかね,羽坂あかね,proper noun
 はねぼしのあ,羽星のあ,proper noun
 はねりこ,はねりこ,proper noun
@@ -1070,6 +1080,7 @@
 ひーたそ,ひーたそ,proper noun
 びつくり,びつくり,proper noun
 びびちゃんだよ,ビビちゃんだよ,proper noun
+びゃくやあんな,白夜アンナ,proper noun
 ぴいぬな,ぴいぬな,proper noun
 ぴかまるえぬえすぴーてぃーぜろいち,ぴかまるNS-PT01,proper noun
 ぴょこち,ぴょこち,proper noun
@@ -1221,6 +1232,7 @@
 みずくもれをん,瑞雲れをん,proper noun
 みずさわいと,水沢絃音,proper noun
 みずなしれき,水無れき,proper noun
+みずなせまる,水無瀬まる,proper noun
 みずのれん,水乃レン,proper noun
 みずみやす,水宮枢,proper noun
 みずもりこまり,水守こまり,proper noun
@@ -1396,6 +1408,7 @@
 ゆめかわ,夢河,proper noun
 ゆめさきめあ,夢咲めあ,proper noun
 ゆめのあかり,夢野あかり,proper noun
+ゆめのこ,ゆめのこ,proper noun
 ゆめのまぴ,夢乃まぴ,proper noun
 ゆめぽた,ゆめポタ,proper noun
 ゆめみむむ,夢見むむ,proper noun
@@ -1429,6 +1442,7 @@
 よるみれな,夜見れな,proper noun
 らいりしゃん,らいりしゃん,proper noun
 らうてる,らうてる,proper noun
+らとちぃ,らとちぃ,proper noun
 らにっくす,らにっくす,proper noun
 らむべりぃ,らむべりぃ,proper noun
 らんきゃん,らんきゃん,proper noun
